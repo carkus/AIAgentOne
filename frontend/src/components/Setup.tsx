@@ -4,7 +4,7 @@ import type { AgentBrief, AgentDraft, BriefMap, PublishedAgent, SavedSearch } fr
 import { getLastOpenedPointer, hideSavedChat, loadHiddenChatIds, loadSavedChats, saveChat, setLastOpenedPointer } from '../chatStorage'
 import type { AgentConfig, AgentTemplateId, ArmStat, BootstrapStreamEvent, LlmProvider, Relic, RelicKind, RelicSuggestion, SavedChat, SavedChatMessage, SearchDefaults } from '../types'
 import { AGENT_TEMPLATES, getTemplate, PERSONALITY_TRAITS, describeTraitEffect, BEHAVIOR_TOGGLES, DEFAULT_AGENT_SPEC, MAX_FOCUS_CHARS, shortFocus, type BehaviorToggle } from '../agentTypes'
-import { storedOllamaModel, describeModel, describeModelFallback, formatModelInfo, type ModelInfo } from '../modelLabel'
+import { storedOllamaModel, storedCloudflareModel, describeModel, describeModelFallback, formatModelInfo, type ModelInfo } from '../modelLabel'
 import { buildAgentBrief, joinNatural } from '../agentBrief'
 import { formatDate, getDateFormat, type DateFormatId } from '../dateFormat'
 import styles from '../styles/Setup.module.css'
@@ -376,6 +376,15 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
     if (m) localStorage.setItem('aiagent_ollama_model', m)
     else localStorage.removeItem('aiagent_ollama_model')
   }
+  // Workers AI model, kept apart from the local one so switching providers
+  // doesn't send an Ollama name to Cloudflare or the reverse.
+  const [cloudflareModel, setCloudflareModel] = useState<string>(() => storedCloudflareModel())
+  function handleCloudflareModelChange(m: string) {
+    setCloudflareModel(m)
+    localStorage.setItem('aiagent_cloudflare_model', m)
+  }
+  // The API's single model slot (`ollama_model`) for the current provider.
+  const activeModel = provider === 'cloudflare' ? cloudflareModel : ollamaModel
   // Same "standing preference across agents, not per-purpose content"
   // treatment as provider/ollamaModel above — these are platform-tuning
   // knobs (Settings screen), not something the bootstrap call should invent.
@@ -408,6 +417,7 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
     localStorage.setItem('aiagent_date_format', f)
   }
   const [availableModels, setAvailableModels] = useState<string[]>([])
+  const [cloudflareModels, setCloudflareModels] = useState<string[]>([])
   const [modelsLoaded, setModelsLoaded] = useState(false)
   const [recommendedArm, setRecommendedArm] = useState<{ provider: string; model: string } | null>(null)
   const [armStats, setArmStats] = useState<ArmStat[]>([])
@@ -602,14 +612,38 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
 
   useEffect(() => {
     if (modelsLoaded) return
-    fetchModelInfo().then(({ models, recommended, armStats }) => {
+    fetchModelInfo().then(({ models, cloudflareModels, recommended, armStats }) => {
       setAvailableModels(models)
+      setCloudflareModels(cloudflareModels)
       setModelsLoaded(true)
       setRecommendedArm(recommended)
       setArmStats(armStats)
       if (provider === 'ollama' && models.length > 0) {
         setOllamaModel(prev => (prev && models.includes(prev)) ? prev : models[0])
       }
+      if (cloudflareModels.length > 0) {
+        setCloudflareModel(prev => cloudflareModels.includes(prev) ? prev : cloudflareModels[0])
+      }
+      // No Ollama on this server (the live site, or local dev with
+      // DISABLE_OLLAMA=1) and no choice other than Ollama saved: use Workers
+      // AI, which is free up to its daily allowance and actually reachable,
+      // instead of a local model that isn't there.
+      let saved: string | null = null
+      try { saved = localStorage.getItem('aiagent_provider') } catch { /* private mode */ }
+      // Not saved: a server that has Ollama again (local dev) must get the
+      // saved/default choice back on the next load, not a pinned Workers AI.
+      if ((!saved || saved === 'ollama') && models.length === 0 && cloudflareModels.length > 0) {
+        setProvider('cloudflare')
+      }
+      // One-time undo of the earlier version, which saved that automatic
+      // switch: a browser left pinned to Workers AI on a machine with Ollama
+      // goes back to local.
+      try {
+        if (!localStorage.getItem('aiagent_cf_autoswitch_undo')) {
+          localStorage.setItem('aiagent_cf_autoswitch_undo', '1')
+          if (saved === 'cloudflare' && models.length > 0) handleProviderChange('ollama')
+        }
+      } catch { /* private mode */ }
     })
   }, [provider, modelsLoaded])
 
@@ -691,7 +725,7 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
         traits: (PERSONALITY_TRAITS[agentType] ?? PERSONALITY_TRAITS.research).filter(t => selectedTraits.includes(t.id)).map(t => t.label),
         behaviors: BEHAVIOR_TOGGLES.filter(t => activeToggles.includes(t.id)).map(t => t.label),
         warning: aiBrief.warning,
-      }, agentName, provider, ollamaModel)
+      }, agentName, provider, activeModel)
       const relic: Relic = { kind: suggestion.kind, content, createdAt: new Date().toISOString() }
       setBriefRelics(prev => [...prev.filter(r => r.kind !== suggestion.kind), relic])
       setBriefRelicPreview(suggestion.kind)
@@ -716,7 +750,7 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
       return
     }
     setBriefMapLoading(true)
-    fetchBriefMap(brief.text, [...keywords], agentType, provider, ollamaModel)
+    fetchBriefMap(brief.text, [...keywords], agentType, provider, activeModel)
       .then(map => {
         if (requestId !== briefRequestIdRef.current) return
         setBriefMap(map)
@@ -749,7 +783,7 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
       // inside the debounce window doesn't count as built.
       lastBriefInputsRef.current = briefInputsKey
       setBriefLoading(true)
-      fetchAgentBrief(agentType, [...keywords], usedLocation, agentName, provider, ollamaModel, undefined, undefined, maxDelegations, behaviorLabels, traitLabels)
+      fetchAgentBrief(agentType, [...keywords], usedLocation, agentName, provider, activeModel, undefined, undefined, maxDelegations, behaviorLabels, traitLabels)
         .then(result => {
           if (requestId !== briefRequestIdRef.current) return
           setAiBrief(result)
@@ -780,7 +814,7 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
     const behaviorLabels = BEHAVIOR_TOGGLES.filter(t => activeToggles.includes(t.id)).map(t => t.label)
     const traitLabels = (PERSONALITY_TRAITS[agentType] ?? PERSONALITY_TRAITS.research)
       .filter(t => selectedTraits.includes(t.id)).map(t => t.label)
-    fetchAgentBrief(agentType, [...keywords], usedLocation, agentName, provider, ollamaModel, aiBrief.text, answer, maxDelegations, behaviorLabels, traitLabels)
+    fetchAgentBrief(agentType, [...keywords], usedLocation, agentName, provider, activeModel, aiBrief.text, answer, maxDelegations, behaviorLabels, traitLabels)
       .then(result => {
         if (requestId !== briefRequestIdRef.current) return
         setAiBrief(result)
@@ -1261,7 +1295,7 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
       const config = await bootstrap(
         purpose,
         provider,
-        provider === 'ollama' ? ollamaModel : null,
+        provider === 'ollama' || provider === 'cloudflare' ? activeModel : null,
         handleProgress,
         agentType,
         controller.signal,
@@ -1274,7 +1308,7 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
         location: loc,
         factor_location: factorLocation,
         provider,
-        ollama_model: provider === 'ollama' ? ollamaModel : null,
+        ollama_model: provider === 'ollama' || provider === 'cloudflare' ? activeModel : null,
         template: agentType,
         max_delegations: maxDelegations,
         search_defaults: searchDefaults,
@@ -1416,7 +1450,7 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
                 title={describeModelFallback(provider)}
               >
                 <span className={styles.modelLinerIcon} aria-hidden="true">🧠</span>
-                <span>{describeModel(provider, ollamaModel)}</span>
+                <span>{describeModel(provider, activeModel)}</span>
               </button>
             </div>
             <div className={styles.agentTypeSelector}>
@@ -1803,7 +1837,7 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
                 <span />
               </div>
               <p className={styles.bootstrapShieldMeta}>
-                {modelInfo ? formatModelInfo(modelInfo) : describeModel(provider, ollamaModel)}
+                {modelInfo ? formatModelInfo(modelInfo) : describeModel(provider, activeModel)}
                 {' · '}{bootstrapElapsed}s elapsed
               </p>
               {toolsSoFar.length > 0 && (
@@ -2361,6 +2395,9 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
         ollamaModel={ollamaModel}
         onOllamaModelChange={handleOllamaModelChange}
         availableModels={availableModels}
+        cloudflareModel={cloudflareModel}
+        onCloudflareModelChange={handleCloudflareModelChange}
+        cloudflareModels={cloudflareModels}
         modelsLoaded={modelsLoaded}
         recommendedArm={recommendedArm}
         armStats={armStats}

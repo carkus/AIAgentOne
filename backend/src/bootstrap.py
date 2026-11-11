@@ -89,10 +89,10 @@ def _build_user_content(prompt: str, image: str | None, provider: str | None):
     note folded into the prompt instead of a content shape it can't handle."""
     if not image:
         return prompt
-    if provider == "ollama":
+    if provider in ("ollama", "cloudflare"):
         return prompt + (
             "\n\n[An image was attached to this purpose, but bootstrap is running "
-            "on a local Ollama model, which can't see images. Design the agent from "
+            "on a text-only model, which can't see images. Design the agent from "
             "the text of the purpose above alone.]"
         )
     return [

@@ -1447,7 +1447,7 @@ clarifying question only belongs AFTER you've already produced real findings
     # has GEMINI_API_KEY unset).
     forced_provider = (provider or os.environ.get("LLM_PROVIDER", "")).strip().lower()
     vision_capable = forced_provider == "gemini" or (
-        forced_provider != "ollama" and bool(os.environ.get("GEMINI_API_KEY"))
+        forced_provider not in ("ollama", "cloudflare") and bool(os.environ.get("GEMINI_API_KEY"))
     )
 
     # Build initial message list: system prompt first, then conversation history
@@ -1469,6 +1469,11 @@ clarifying question only belongs AFTER you've already produced real findings
                 "describe what's in the image in words, or switch the agent to the "
                 "Gemini provider to analyze it directly.]"
                 if forced_provider == "ollama" else
+                "[The user attached an image, but this agent is running "
+                "on a Workers AI text model, which can't see images. Ask them to "
+                "describe what's in the image in words, or switch the agent to the "
+                "Gemini provider to analyze it directly.]"
+                if forced_provider == "cloudflare" else
                 "[The user attached an image, but no vision-capable provider is "
                 "currently configured (Gemini isn't set up), so this reply is "
                 "running on a text-only model that can't see it. Ask them to "

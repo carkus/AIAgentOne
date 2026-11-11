@@ -8,6 +8,13 @@ import type { LlmProvider, ModelAttempt, TraceSpan } from './types'
 // same choice differently.
 export const GEMINI_MODEL_NAME = 'gemini-3.6-flash'
 export const DEFAULT_OLLAMA_MODEL = 'qwen3:8b'
+// Mirrors llm_client.CLOUDFLARE_MODELS[0] (Workers AI's hosted Qwen).
+export const DEFAULT_CLOUDFLARE_MODEL = '@cf/qwen/qwen3.8-27b'
+
+// "@cf/qwen/qwen3.8-27b" -> "qwen3.8-27b"
+export function shortCloudflareModel(model: string): string {
+  return model.split('/').pop() || model
+}
 
 // The saved local model, with a one-time move off the old default
 // (qwen2.5-coder:7b): browsers that never picked a model kept it in
@@ -27,8 +34,23 @@ export function storedOllamaModel(): string {
   }
 }
 
+export function storedCloudflareModel(): string {
+  try {
+    return localStorage.getItem('aiagent_cloudflare_model') || DEFAULT_CLOUDFLARE_MODEL
+  } catch {
+    return DEFAULT_CLOUDFLARE_MODEL
+  }
+}
+
+// The model name sent as `ollama_model` (the API's one model slot) for a
+// provider: the saved Workers AI model, otherwise the saved local one.
+export function storedModelFor(provider: LlmProvider | undefined): string {
+  return provider === 'cloudflare' ? storedCloudflareModel() : storedOllamaModel()
+}
+
 export function describeModel(provider: LlmProvider | undefined, ollamaModel?: string | null): string {
   if (provider === 'ollama') return `Ollama: ${ollamaModel ?? DEFAULT_OLLAMA_MODEL}`
+  if (provider === 'cloudflare') return `Workers AI: ${shortCloudflareModel(ollamaModel ?? DEFAULT_CLOUDFLARE_MODEL)}`
   return `Gemini (${GEMINI_MODEL_NAME})`
 }
 
@@ -80,13 +102,15 @@ export function lastServedModel(spanLists: (TraceSpan[] | undefined)[]): ModelAt
 export function describeServedModel({ provider, model }: ModelAttempt): string {
   if (provider === 'ollama') return `Ollama: ${model}`
   if (provider === 'gemini') return `Gemini (${model})`
+  if (provider === 'cloudflare') return `Workers AI: ${shortCloudflareModel(model)}`
   return `${provider}: ${model}`
 }
 
 export function describeModelFallback(provider: LlmProvider | undefined): string {
   if (provider === 'ollama') return 'Pinned to local Ollama — no cloud fallback for this agent'
   if (provider === 'gemini') return 'Pinned to cloud Gemini — no local fallback for this agent'
-  return `Auto cascade: Gemini first, falls back to local Ollama (${DEFAULT_OLLAMA_MODEL}) if Gemini is unavailable`
+  if (provider === 'cloudflare') return 'Pinned to Cloudflare Workers AI (hosted Qwen, free daily allowance)'
+  return `Auto cascade: Gemini first, then Workers AI if configured, then local Ollama (${DEFAULT_OLLAMA_MODEL})`
 }
 
 // Formats a real, in-flight `{"type": "model", ...}` stream event (which

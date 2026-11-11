@@ -53,8 +53,10 @@ Create this as the `aiagent` user, mode 600 — **not** inline `Environment=` li
 sudo -u aiagent tee /var/www/aiagent/.env > /dev/null <<'EOF'
 GEMINI_API_KEY=<real key>
 HF_API_TOKEN=<real huggingface token — free account, no billing>
-CLOUDFLARE_ACCOUNT_ID=<optional — generate_image's next fallback after Hugging Face>
+CLOUDFLARE_ACCOUNT_ID=<optional — Workers AI: hosted Qwen chat models + generate_image's last fallback>
 CLOUDFLARE_API_TOKEN=<optional — token with the Workers AI permission>
+TAVILY_API_KEY=<optional — general web search MCP server; without it agents have no web search>
+DISABLE_OLLAMA=1
 ADZUNA_APP_ID=<real id>
 ADZUNA_APP_KEY=<real key>
 RATE_LIMIT_PER_MINUTE=5
@@ -75,6 +77,17 @@ error. With it, Gemini isn't required for image generation to work: unset
 `GEMINI_API_KEY` entirely and `generate_image` goes straight to the free
 Hugging Face path (rate-limited, not billed) with zero code change, same as
 local dev.
+
+`CLOUDFLARE_ACCOUNT_ID`/`CLOUDFLARE_API_TOKEN` also turn on the Workers AI
+chat provider (`llm_client.py`): the Setup model picker offers "Hosted Qwen
+(Cloudflare Workers AI)" (`@cf/qwen/qwen3.8-27b`, `@cf/qwen/qwen3-30b-a3b-fp8`;
+override with `CLOUDFLARE_MODELS`), it sits between Gemini and Ollama in the
+Auto cascade, and a browser with no saved choice on a server with no Ollama
+defaults to it. Free up to 10,000 neurons a day per account; past that, calls
+fail until 00:00 UTC unless the account is on Workers Paid. Restart
+`aiagent` after adding them. `DISABLE_OLLAMA=1` keeps the droplet's own
+Ollama (another app's) out of the cascade; set the same in local `env.json`
+to run locally exactly what runs live.
 
 `MCP_API_KEY` is read by `backend/mcp_server.py` (`aiagent-mcp.service`, same
 `EnvironmentFile`) — it's what a programmatic MCP client (e.g. jobfit) sends

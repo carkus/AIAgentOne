@@ -293,20 +293,22 @@ export async function buildRelic(
  */
 export async function fetchModelInfo(): Promise<{
   models: string[]
+  cloudflareModels: string[]
   recommended: { provider: string; model: string } | null
   armStats: ArmStat[]
 }> {
   try {
     const res = await fetch(`${API_URL}/models`);
-    if (!res.ok) return { models: [], recommended: null, armStats: [] };
+    if (!res.ok) return { models: [], cloudflareModels: [], recommended: null, armStats: [] };
     const data = await res.json();
     return {
       models: Array.isArray(data.models) ? data.models : [],
+      cloudflareModels: Array.isArray(data.cloudflare_models) ? data.cloudflare_models : [],
       recommended: data.recommended ?? null,
       armStats: Array.isArray(data.arm_stats) ? data.arm_stats : [],
     };
   } catch {
-    return { models: [], recommended: null, armStats: [] };
+    return { models: [], cloudflareModels: [], recommended: null, armStats: [] };
   }
 }
 

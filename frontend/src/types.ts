@@ -13,7 +13,7 @@ export interface ToolDefinition {
 }
 
 // undefined/null = default cascade (Gemini, falling back to local Ollama on error)
-export type LlmProvider = 'gemini' | 'ollama' | null;
+export type LlmProvider = 'gemini' | 'cloudflare' | 'ollama' | null;
 
 // Which purpose template Setup.tsx used to build `purpose` — lets the Setup
 // screen restore its "Agent type" dropdown when repopulating from a saved

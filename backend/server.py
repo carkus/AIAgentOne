@@ -41,7 +41,7 @@ from agent_stream import run_agent_stream
 from brief import generate_brief, generate_brief_map
 from recap import generate_recap
 from relic import KINDS, generate_relic
-from llm_client import list_ollama_models, GEMINI_MODEL
+from llm_client import list_ollama_models, GEMINI_MODEL, CLOUDFLARE_MODELS, cloudflare_configured
 import bandit
 import rate_limit
 import saved_searches
@@ -118,7 +118,9 @@ def models():
     if request.method == "OPTIONS":
         return "", 204
     ollama_models = list_ollama_models()
+    cloudflare_models = CLOUDFLARE_MODELS if cloudflare_configured() else []
     candidates = [("ollama", m) for m in ollama_models]
+    candidates += [("cloudflare", m) for m in cloudflare_models]
     if os.environ.get("GEMINI_API_KEY"):
         candidates.append(("gemini", GEMINI_MODEL))
     try:
@@ -128,6 +130,8 @@ def models():
         rec = {"recommended": None, "arms": []}
     return jsonify({
         "models": ollama_models,
+        "cloudflare_models": cloudflare_models,
+        "gemini": bool(os.environ.get("GEMINI_API_KEY")),
         "recommended": rec["recommended"],
         "arm_stats": rec["arms"],
     })

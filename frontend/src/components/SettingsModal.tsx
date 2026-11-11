@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ArmStat, LlmProvider, SearchDefaults } from '../types'
 import { listMcpTools, type McpServerInfo } from '../api'
-import { isTinyOllamaModel, isReasoningOllamaModel } from '../modelLabel'
+import { isTinyOllamaModel, isReasoningOllamaModel, shortCloudflareModel } from '../modelLabel'
 import { DATE_FORMAT_OPTIONS, type DateFormatId } from '../dateFormat'
 import styles from '../styles/SettingsModal.module.css'
 
@@ -28,6 +28,10 @@ interface Props {
   ollamaModel: string | null
   onOllamaModelChange: (m: string | null) => void
   availableModels: string[]
+  cloudflareModel: string
+  onCloudflareModelChange: (m: string) => void
+  // Workers AI models the server offers ([] when it has no Cloudflare credentials).
+  cloudflareModels: string[]
   modelsLoaded: boolean
   // Data-backed pick from backend/src/bandit.py's UCB1 ranking over
   // eval_log.json history — advisory only, badged next to the manual
@@ -60,6 +64,9 @@ export default function SettingsModal({
   ollamaModel,
   onOllamaModelChange,
   availableModels,
+  cloudflareModel,
+  onCloudflareModelChange,
+  cloudflareModels,
   modelsLoaded,
   recommendedArm,
   armStats,
@@ -162,6 +169,9 @@ export default function SettingsModal({
             >
               <option value="">Auto (cloud, falls back to local)</option>
               <option value="gemini">Cloud only (Gemini)</option>
+              {(cloudflareModels.length > 0 || provider === 'cloudflare') && (
+                <option value="cloudflare">Hosted Qwen (Cloudflare Workers AI) — free daily allowance</option>
+              )}
               <option value="ollama">Local only (Ollama) — free, needs `ollama serve` running</option>
             </select>
 
@@ -174,6 +184,34 @@ export default function SettingsModal({
                   return ` — ${Math.round((stat.rate ?? 0) * 100)}% pass rate over ${stat.pulls} checks.`
                 })()}
               </p>
+            )}
+
+            {provider === 'cloudflare' && (
+              <>
+                {cloudflareModels.length > 0 ? (
+                  <select
+                    className={styles.providerSelect}
+                    value={cloudflareModel}
+                    onChange={e => onCloudflareModelChange(e.target.value)}
+                    disabled={disabled}
+                  >
+                    {cloudflareModels.map(m => (
+                      <option key={m} value={m}>
+                        {shortCloudflareModel(m)}{recommendedArm?.provider === 'cloudflare' && recommendedArm.model === m ? ' ★ recommended' : ''}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <select className={styles.providerSelect} disabled>
+                    <option>{modelsLoaded ? 'Workers AI is not configured on this server' : 'Loading…'}</option>
+                  </select>
+                )}
+                <p className={styles.providerHint}>
+                  Runs on Cloudflare's servers, so it works on the live site. Free up to
+                  Cloudflare's daily allowance; past that, calls fail until it resets at
+                  00:00 UTC (or pick Auto to fall back to Gemini).
+                </p>
+              </>
             )}
 
             {provider === 'ollama' && (
