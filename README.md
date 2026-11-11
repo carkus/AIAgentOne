@@ -1,4 +1,4 @@
-# AI Agent — Self-Scaffolding Agent Platform
+# AI Agent One — Self-Scaffolding Agent Platform
 
 Most AI tools make you fit your problem to their interface. This one works the other way around.
 
@@ -118,7 +118,7 @@ deployed. Don't expect changes to `handler.py` to reach production; see
 ## Project Structure
 
 ```
-AIAgent/
+AIAgentOne/
 ├── backend/
 │   ├── server.py            # Flask app — actual runtime for dev + prod: /bootstrap, /agent, /models, /agents, /file/<name>
 │   ├── mcp_server.py         # Separate uvicorn/ASGI process — exposes published agents as MCP tools over Streamable HTTP
