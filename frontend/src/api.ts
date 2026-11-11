@@ -1,4 +1,4 @@
-import type { AgentConfig, AgentSpec, AgentTemplateId, ArmStat, BootstrapStreamEvent, EvalResultItem, LlmProvider, RelicSuggestion, SavedChatMessage, StreamEvent } from './types';
+import type { AgentConfig, AgentSpec, AgentTemplateId, ArmStat, BootstrapStreamEvent, Deliverable, EvalResultItem, LlmProvider, RelicSuggestion, SavedChatMessage, StreamEvent } from './types';
 
 const API_URL = import.meta.env.VITE_API_URL ?? '';
 
@@ -213,6 +213,76 @@ export async function fetchBriefMap(
     if (!res.ok) return null;
     const data = await res.json();
     return data.map ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Smart Focus (POST /brief-focus, focus_insights.py): chosen topics that
+ * overlap in meaning, and Saved Focus items related to what's chosen, by
+ * embedding similarity. Null on any failure: the Focus step shows nothing
+ * extra.
+ */
+export interface FocusInsights {
+  overlaps: { a: string; b: string; similarity: number }[]
+  related: { topic: string; near: string; similarity: number }[]
+}
+
+export async function fetchFocusInsights(
+  keywords: string[],
+  pool: string[],
+  provider?: LlmProvider,
+  signal?: AbortSignal,
+): Promise<FocusInsights | null> {
+  try {
+    const res = await fetch(`${API_URL}/brief-focus`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal,
+      body: JSON.stringify({ keywords, pool, provider: provider ?? undefined }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return Array.isArray(data.overlaps) && Array.isArray(data.related) ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Setup's Outputs step: the deliverables the agent proposes for this job
+ * (POST /brief-outputs, brief.py's propose_outputs). Resolves to null on any
+ * failure, and the step falls back to picking kinds by hand.
+ */
+export async function fetchBriefOutputs(
+  keywords: string[],
+  brief: string,
+  agentType: AgentTemplateId | undefined,
+  traits: string[],
+  behaviors: string[],
+  provider?: LlmProvider,
+  ollamaModel?: string | null,
+  signal?: AbortSignal,
+): Promise<Deliverable[] | null> {
+  try {
+    const res = await fetch(`${API_URL}/brief-outputs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal,
+      body: JSON.stringify({
+        keywords,
+        brief,
+        agentType,
+        traits,
+        behaviors,
+        provider: provider ?? undefined,
+        ollama_model: ollamaModel ?? undefined,
+      }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return Array.isArray(data.outputs) ? data.outputs : null;
   } catch {
     return null;
   }

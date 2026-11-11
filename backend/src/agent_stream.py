@@ -112,6 +112,48 @@ def _extract_relic_suggestions(content: str) -> tuple[str, list[dict]]:
             suggestions.append({"kind": kind, "reason": reason})
     return _RELIC_FENCE_RE.sub("", content).strip(), suggestions[:2]
 
+def _chosen_deliverables(agent_config: dict) -> list[dict]:
+    """The outputs the user picked on Setup's Outputs step
+    (AgentConfig.deliverables), each {kind, title}, unknown kinds dropped."""
+    chosen: list[dict] = []
+    for item in agent_config.get("deliverables") or []:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind") or "").strip().lower()
+        if kind in RELIC_KINDS and all(c["kind"] != kind for c in chosen):
+            chosen.append({"kind": kind, "title": str(item.get("title") or "").strip()[:80]})
+    return chosen
+
+
+def _deliverables_rule(agent_config: dict) -> str:
+    """Appended to rule 7b when the user chose outputs at setup: those are
+    what this job is for, so the agent works toward them and offers them."""
+    chosen = _chosen_deliverables(agent_config)
+    if not chosen:
+        return ""
+    lines = "\n".join(f'   - "{c["kind"]}": {c["title"] or c["kind"]}' for c in chosen)
+    return (
+        "\n\n   THE USER ASKED FOR THESE OUTPUTS when they set up this job:\n"
+        f"{lines}\n"
+        "   Gather what each one needs (real names, numbers, steps) while you\n"
+        "   research, and on research turns list them in your ```relic block\n"
+        "   (they don't count toward the one-or-two limit), with a reason naming\n"
+        "   what you found that will go in each."
+    )
+
+
+def _merge_deliverables(suggestions: list[dict], agent_config: dict) -> list[dict]:
+    """Research turns always offer the chosen outputs, whether or not the
+    model remembered to list them: the user picked them, so code guarantees
+    the buttons. The model's own reason wins when it gave one."""
+    merged = list(suggestions)
+    for chosen in _chosen_deliverables(agent_config):
+        if any(s["kind"] == chosen["kind"] for s in merged):
+            continue
+        merged.append({"kind": chosen["kind"], "reason": chosen["title"] or "One of the outputs you asked for"})
+    return merged
+
+
 # Rule "REPORT BACK WITH OPTIONS": the main agent closes a reply with a
 # ```options fence listing the next moves it has devised for this job.
 # Stripped from the text and sent as `next_options`; Chat.tsx shows each as a
@@ -1342,7 +1384,7 @@ clarifying question only belongs AFTER you've already produced real findings
    words, naming what the artifact would contain. Do NOT mention the block
    in your prose: the user sees it as a button, and nothing is built unless
    they click it. Skip it for short answers, greetings, follow-up
-   questions, or anything that reads fine as a chat message.
+   questions, or anything that reads fine as a chat message.{_deliverables_rule(agent_config)}
 
 7c. ALWAYS REPLY IN THE USER'S LANGUAGE: English unless the user writes in
    another language. Never switch language partway through, even when the
@@ -1746,6 +1788,8 @@ clarifying question only belongs AFTER you've already produced real findings
             # No tool calls → final response
             if not effective_tool_calls:
                 final_text, relic_suggestions = _extract_relic_suggestions(raw_content or "")
+                if research_turn and allow_delegation:
+                    relic_suggestions = _merge_deliverables(relic_suggestions, agent_config)
                 final_text, next_options = _extract_next_options(final_text)
                 # Small models sometimes wrap the whole reply in <response> tags.
                 final_text = re.sub(r"^\s*<response>\s*|\s*</response>\s*$", "", final_text)
