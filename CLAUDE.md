@@ -73,6 +73,7 @@ expecting it to reach production.
 | `backend/src/llm_client.py` | Gemini → Ollama cascade (`create_chat_completion`), model listing for the Setup screen's picker |
 | `backend/src/embeddings.py` | `embed_text()` — Gemini (`gemini-embedding-2-preview`) or Ollama (`nomic-embed-text`) embeddings + cosine similarity, used for bootstrap grounding |
 | `backend/src/bootstrap_memory.py` | Store of past `purpose → generated config` pairs (`bootstrap_memory` table in `db.py`); `record()`/`retrieve_similar()` power bootstrap few-shot grounding (RAG) |
+| `backend/src/focus_insights.py` | Smart Focus for Setup's Focus step (`POST /brief-focus`, no chat call): embeds chosen topics and the Saved Focus pool, flags near-duplicate topic pairs (one-click remove) and suggests related saved topics. Per-backend `THRESHOLDS` (nomic measured, Gemini estimated); in-process memo of embeddings; `None` → the step shows nothing extra |
 | `backend/src/mcp_registry.py` | The vetted MCP server directory — `mcp-server-time`/`mcp-server-fetch` (stdio, official reference servers) plus Tavily's official remote MCP server for general web search (`"http"` transport, only added when `TAVILY_API_KEY` is set) — where a new trusted MCP server is added |
 | `backend/src/mcp_client.py` | Sync wrapper around the official `mcp` SDK — `_session_cm()` picks stdio or Streamable HTTP per server; `catalog_summary()` lists real tool schemas, `call_tool()` executes one |
 | `backend/src/agent_registry.py` | Store of *published* agents (`agent_registry` table in `db.py`) — the explicit, human-in-the-loop persistence step (partially addresses Limitation #7) that backs `mcp_server.py`'s tool list; `publish()`/`unpublish()`/`list_agents()`/`get_by_tool_name()` |
@@ -82,7 +83,7 @@ expecting it to reach production.
 | `backend/src/bandit.py` | UCB1 multi-armed-bandit ranking over `eval_log.py` history — `recommend(candidates)` scores each `(provider, model)` arm and returns the top pick plus per-arm stats; advisory only, consumed by `/models` |
 | `backend/eval_harness.py`, `backend/eval_cases/bootstrap.jsonl`, `backend/eval_cases/chat.jsonl` | Offline eval harness — `--suite bootstrap` or `--suite chat` × model arms × N repeats, scores with `eval_checks` plus per-case expectations, writes `eval_runs/<suite>-<stamp>.jsonl` + `.md` report; `--publish` merges a summary into `frontend/public/eval-scoreboard.json`; isolated from live `eval_log`/`bootstrap_memory` |
 | `backend/eval_replay.py`, `backend/eval_cases/chat_fixtures/` | Chat-suite tool tape: patches every tool entry point `agent_stream.py` uses (primitives, MCP, generated `exec()`, whole delegated workers) to answer from a recorded tape; one committed fixture per case = frozen `AgentConfig` + tape |
-| `frontend/src/components/ScoreboardModal.tsx` | "▤ Scoreboard" in Setup's top icon bar — renders `eval-scoreboard.json` per suite (pass rate per check per model, median time, tokens, cost/task, replay stats) beside the live bandit pick and live pass rates from `GET /models` |
+| `frontend/src/components/ScoreboardModal.tsx` | "▤ Scoreboard" (its button in Setup's top icon bar is removed for now; the modal is still mounted) — renders `eval-scoreboard.json` per suite (pass rate per check per model, median time, tokens, cost/task, replay stats) beside the live bandit pick and live pass rates from `GET /models` |
 | `backend/src/agent_spec.py` | Advanced Setup's structured spec — `normalize()` (re-run at every trust boundary), `bootstrap_prompt_block()`, `enforce_on_config()` (post-bootstrap pins/drops), `runtime_scope_note()`, and the allow-list predicates `agent_stream.py` enforces |
 | `backend/src/scope_guard.py` | Output guard for `spec.out_of_scope` — separate narrow judge call screens final replies and worker responses; one regenerate, then a code-authored decline; fail-open |
 | `backend/src/run_trace.py` | Run-trace spans (Showcase Goal 1): a per-run ContextVar sink that `llm_client.create_chat_completion` (via `_trace=` labels), `agent_stream.py` tool/worker paths and `orchestrator.run_worker` record timed spans into; streamed as `{"type":"trace","span":...}` events and logged to stderr (logger `run_trace`) for journalctl timing |
@@ -101,6 +102,7 @@ expecting it to reach production.
 | `frontend/src/components/ToolActivity.tsx` | Renders tool call log inline under each assistant message; top-level container and every nested keyword/worker section are independently collapsible |
 | `frontend/src/components/CaseFile.tsx` | The "Case file" toggle under each assistant turn: waterfall of that turn's `TraceSpan`s (model calls, self-checks, tools, workers with their own nested spans) with wall time, reasoning/check/tool totals, tokens and models; spans are saved with the chat (`SavedChatMessage.trace`) |
 | `frontend/src/components/AgentMakingReport.tsx` | "How this agent was made" above the chat, open by default: the brief, grounding (similar past agents with match %, MCP tools offered), the design call's model/persona/proposed tools, what the code checks caught and whether the retry fixed it or the tool was dropped, spec rules applied, the final persona/system prompt/tools with their code, self-checks and whether it was saved to memory; read from `AgentConfig.bootstrap_report` (written by `_generate_agent_config_stream`), with the `bootstrap_trace` timings (`CaseFile`) underneath |
+| `frontend/src/components/ProcessGraph.tsx`, `ColumnGraph.tsx` | Setup's live process graph, in the "Build your agent" panel with the 1-4 step breadcrumbs above it (the bootstrap shield covers only the step's working panel below it, so the graph stays visible during deploy, when it narrows to the deploy stages): Focus → Character → Brief → Outputs as taken so far, then bootstrap's stages from the `stage` tag on its `status` events (grounding → design → one node per streamed tool → code checks → self-checks → ready), each node pending/active/done/skipped/failed; a failed or cancelled run stays drawn on the steps. `ColumnGraph` is the shared column layout/fit/zoom, also used by `BriefGraph` |
 | `frontend/src/components/MermaidDiagram.tsx` | Renders one Mermaid chart string to SVG via the `mermaid` package, themed to match the app's dark-cyan palette; used by `Chat.tsx` for ` ```mermaid ` fences in assistant replies |
 
 ---
@@ -796,7 +798,18 @@ the agent offers, based on what it judges will be most useful for that job:
 spreadsheets, charts, diagrams, reports, documents, slide decks, data files
 and so on. The chat transcript becomes one way in, not the product itself.
 Output relics (`relic.py`, agent_stream.py rule 7b, the Export menu and
-relics list in `Chat.tsx`) are the first step. When adding UI or naming
+relics list in `Chat.tsx`) are the first step.
+
+**Setup's Outputs step (step 4)** is the second. Once the brief settles,
+`POST /brief-outputs` (`brief.py`'s `propose_outputs`, under the `/brief`
+proxy prefix) proposes 3-5 deliverables `{kind, title, reason,
+recommended}`. The agent's own picks are pre-ticked and the user can change
+them. If the call fails, every relic kind is offered to pick by hand. The
+chosen ones are added to the bootstrap purpose and stored as
+`AgentConfig.deliverables`. In `agent_stream.py`, `_deliverables_rule()`
+appends them to rule 7b, and on research turns `_merge_deliverables()` makes
+code, not the model, guarantee their relic buttons. They are added on top of
+the model's usual two suggestions. When adding UI or naming
 things, lean toward outputs/deliverables over "chat" wording, and treat
 the agent proactively proposing the right outputs as the core behaviour.
 
@@ -850,7 +863,7 @@ task, and bandit pick vs. eval result.
 **Status: done (first version).** `eval_harness.py --suite chat` with
 `eval_replay.py` tapes, five cases in `eval_cases/chat.jsonl`, `--publish`
 to `frontend/public/eval-scoreboard.json`, and `ScoreboardModal.tsx` (▤ in
-Setup's top bar) comparing eval leader vs. live bandit pick. See the eval
+Setup's top bar, button removed for now) comparing eval leader vs. live bandit pick. See the eval
 harness section under Backend Patterns. Fixtures were recorded on
 `ollama:qwen2.5-coder:7b`; a Gemini comparison needs `GEMINI_API_KEY`
 locally.

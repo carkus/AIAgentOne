@@ -115,10 +115,6 @@ export default function App() {
     setPhase('setup')
   }
 
-  function handleNewAgentName() {
-    setAgentName(randomSurname())
-  }
-
   // "Recommission" — restarts the conversation but keeps the same agent
   // config (same search/keywords/purpose), so the user doesn't have to
   // redo Setup to rerun an existing search. Not a return to Setup at all;
@@ -158,7 +154,6 @@ export default function App() {
         <Setup
           agentName={agentName}
           onAgentNameChange={setAgentName}
-          onNewAgent={handleNewAgentName}
           bootstrapping={phase === 'bootstrapping'}
           error={bootstrapError}
           onStart={handleBootstrapStart}
