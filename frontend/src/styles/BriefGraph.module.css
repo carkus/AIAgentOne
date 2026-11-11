@@ -5,29 +5,30 @@
   width: 220px;
   padding: 0.55rem 0.7rem;
   border-radius: 8px;
-  background: #ffffff;
-  border: 1px solid #ddd9cd;
-  box-shadow: 0 1px 3px rgba(22, 50, 74, 0.08);
-  font-family: 'Sora', 'Inter', sans-serif;
+  background: var(--color-surface);
+  border: 1px solid var(--graph-20);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  font-family: inherit;
 }
 
-.node_ask { border-color: #3f7ea0; }
-.node_understood { border-color: #cfe3ea; }
-.node_work { border-color: #1f6f73; }
-.node_result { border-color: #2f7a3d; background: #f3faf4; }
+/* Darkens left to right, one step on the ramp per stage. */
+.node_ask { border-color: var(--graph-35); }
+.node_understood { border-color: var(--graph-50); }
+.node_work { border-color: var(--graph-65); }
+.node_result { border-color: var(--graph-80); background: var(--graph-10); }
 
 .nodeTitle {
   flex: 1;
   font-weight: 600;
   font-size: 0.82rem;
-  color: #16324a;
+  color: var(--graph-100);
 }
 
 .nodeText {
   margin: 0.3rem 0 0;
   font-size: 0.74rem;
   line-height: 1.4;
-  color: #33475a;
+  color: var(--graph-100);
 }
 
 .nodeList {
@@ -35,7 +36,7 @@
   padding-left: 1rem;
   font-size: 0.74rem;
   line-height: 1.4;
-  color: #33475a;
+  color: var(--graph-100);
 }
 
 .nodeList li + li {

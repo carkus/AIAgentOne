@@ -27,6 +27,18 @@
   --color-accent-hover: #012955;
   --color-accent-secondary: #3f7ea0;
 
+  /* Graphs (run trace, brief graph, process graph): one hue, the text
+     colour, in a linear ramp of strengths mixed into white, so the cards
+     read as shades of a single ink rather than a set of signal colours.
+     Derived, so the theme picker's text colour carries through. */
+  --graph-10: color-mix(in srgb, var(--color-text) 6%, white);
+  --graph-20: color-mix(in srgb, var(--color-text) 20%, white);
+  --graph-35: color-mix(in srgb, var(--color-text) 35%, white);
+  --graph-50: color-mix(in srgb, var(--color-text) 50%, white);
+  --graph-65: color-mix(in srgb, var(--color-text) 65%, white);
+  --graph-80: color-mix(in srgb, var(--color-text) 80%, white);
+  --graph-100: var(--color-text);
+
   /* The app's "menu" accent — the darker, navy-leaning steel-blue used as a
      solid fill by the toolbar's one primary-action button (New agent/Send)
      in Chat.module.css. The user's own chat bubble background is bound to

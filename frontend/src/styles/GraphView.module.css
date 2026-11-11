@@ -1,15 +1,14 @@
-/* Node-to-node reasoning graph (GraphView.tsx) — same light cream/navy/teal
-   palette as the rest of the app (see root CLAUDE.md's "Branding — Agent
-   One" section), not React Flow's own default dark theme. */
+/* Node-to-node reasoning graph (GraphView.tsx). Monotone: every colour is
+   a step on the --graph-* ramp (index.css), and text is the page font. */
 
 /* Extra class on the GraphFrame (GraphFrame.tsx owns the square size,
    border and zoom controls). */
 .container {
-  background: #fbfaf7;
+  background: var(--color-bg);
 }
 
 .empty {
-  color: #6b7785;
+  color: var(--color-muted);
   font-style: italic;
   font-size: 0.85rem;
   margin: 0.5rem 0;
@@ -19,16 +18,16 @@
   width: 236px;
   padding: 0.55rem 0.7rem;
   border-radius: 8px;
-  background: #ffffff;
-  border: 1px solid #ddd9cd;
-  box-shadow: 0 1px 3px rgba(22, 50, 74, 0.08);
-  font-family: 'Sora', 'Inter', sans-serif;
+  background: var(--color-surface);
+  border: 1px solid var(--graph-20);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  font-family: inherit;
   cursor: pointer;
 }
 
 .node:hover {
-  border-color: #1f6f73;
-  box-shadow: 0 2px 6px rgba(22, 50, 74, 0.14);
+  border-color: var(--graph-80);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
 }
 
 .nodeHeader {
@@ -40,12 +39,15 @@
 .nodeIcon {
   font-size: 0.95rem;
   line-height: 1;
+  /* Emoji are full colour; greyed so the cards stay one ink. */
+  filter: grayscale(1);
+  opacity: 0.75;
 }
 
 .nodeTitle {
   font-weight: 600;
   font-size: 0.85rem;
-  color: #16324a;
+  color: var(--graph-100);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -55,14 +57,13 @@
 .nodeMeta {
   margin: 0.3rem 0 0;
   font-size: 0.7rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color: #6b7785;
+  color: var(--color-muted);
 }
 
 .nodeSubtitle {
   margin: 0.3rem 0 0;
   font-size: 0.75rem;
-  color: #6b7785;
+  color: var(--color-muted);
   line-height: 1.35;
   overflow: hidden;
   display: -webkit-box;
@@ -80,7 +81,7 @@
 }
 
 .evalLabel {
-  color: #6b7785;
+  color: var(--color-muted);
   font-weight: 400;
 }
 
@@ -90,21 +91,21 @@
   margin-top: 0.35rem;
   font-size: 0.72rem;
   font-weight: 600;
-  color: #1f6f73;
+  color: var(--graph-80);
 }
 
 .node:hover .nodeOpen {
   text-decoration: underline;
 }
 
-.evalPass { color: #2f7a3d; }
-.evalFail { color: #b91c1c; }
+.evalPass { color: var(--graph-50); }
+.evalFail { color: var(--graph-100); }
 
-.node_plan { border-color: #3f7ea0; }
-.node_status { border-color: #cfe3ea; }
-.node_tool { border-color: #1f6f73; }
-.node_done { border-color: #2f7a3d; background: #f3faf4; }
-.node_error { border-color: #b91c1c; background: #fee2e2; }
+.node_status { border-color: var(--graph-20); }
+.node_plan { border-color: var(--graph-35); }
+.node_tool { border-color: var(--graph-50); }
+.node_done { border-color: var(--graph-80); background: var(--graph-10); }
+.node_error { border-color: var(--graph-100); border-width: 2px; background: var(--graph-10); }
 
 .nodePending {
   border-style: dashed;
@@ -115,7 +116,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #1f6f73;
+  background: var(--graph-80);
   margin-left: auto;
   animation: pulse 1.2s ease-in-out infinite;
 }
@@ -131,18 +132,18 @@
 .handle {
   width: 6px;
   height: 6px;
-  background: #cfe3ea;
+  background: var(--graph-35);
   border: none;
   pointer-events: none;
 }
 
 .edge :global(.react-flow__edge-path) {
-  stroke: #cfe3ea;
+  stroke: var(--graph-35);
   stroke-width: 1.5;
 }
 
 :global(.react-flow__edge.animated) :global(.react-flow__edge-path) {
-  stroke: #1f6f73;
+  stroke: var(--graph-80);
 }
 
 :global(.react-flow__attribution) {
@@ -166,16 +167,16 @@
 
 .modalPanel {
   position: relative;
-  background: #ffffff;
-  border: 1px solid #e2dfd5;
+  background: var(--color-surface);
+  border: 1px solid var(--graph-20);
   border-radius: 14px;
   width: 100%;
   max-width: 640px;
   max-height: 80vh;
   overflow: auto;
   padding: 1.75rem;
-  box-shadow: 0 24px 64px rgba(22, 50, 74, 0.22);
-  font-family: 'Inter', sans-serif;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.18);
+  font-family: inherit;
 }
 
 .modalCloseBtn {
@@ -185,17 +186,17 @@
   width: 1.9rem;
   height: 1.9rem;
   border-radius: 50%;
-  border: 1px solid #ddd9cd;
-  background: #fbfaf7;
-  color: #16324a;
+  border: 1px solid var(--graph-20);
+  background: var(--color-bg);
+  color: var(--graph-100);
   cursor: pointer;
   font-size: 0.9rem;
   line-height: 1;
 }
 
 .modalCloseBtn:hover {
-  background: #f3faf4;
-  border-color: #1f6f73;
+  background: var(--graph-10);
+  border-color: var(--graph-80);
 }
 
 .modalHeader {
@@ -204,7 +205,7 @@
   gap: 0.5rem;
   font-size: 1.15rem;
   font-weight: 700;
-  color: #16324a;
+  color: var(--graph-100);
   margin: 0 1.8rem 1rem 0;
 }
 
@@ -214,27 +215,27 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #6b7785;
+  color: var(--color-muted);
 }
 
 .modalText {
   margin: 0;
   font-size: 0.95rem;
   line-height: 1.5;
-  color: #33475a;
+  color: var(--graph-100);
   white-space: pre-wrap;
 }
 
 .modalMeta {
   margin: -0.5rem 0 0;
   font-size: 0.8rem;
-  color: #6b7785;
+  color: var(--color-muted);
 }
 
 .modalMarkdown {
   font-size: 0.92rem;
   line-height: 1.5;
-  color: #33475a;
+  color: var(--graph-100);
 }
 
 .modalMarkdown :global(p) {
@@ -246,14 +247,14 @@
   padding: 0;
   list-style: none;
   font-size: 0.85rem;
-  color: #33475a;
+  color: var(--graph-100);
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
 }
 
 .checkReason {
-  color: #6b7785;
+  color: var(--color-muted);
 }
 
 .modalPre {
@@ -261,9 +262,9 @@
   font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
   font-size: 0.82rem;
   line-height: 1.5;
-  color: #33475a;
-  background: #fbfaf7;
-  border: 1px solid #e2dfd5;
+  color: var(--graph-100);
+  background: var(--color-bg);
+  border: 1px solid var(--graph-20);
   border-radius: 8px;
   padding: 0.75rem;
   white-space: pre-wrap;

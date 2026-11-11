@@ -35,6 +35,9 @@ interface Props {
   scrollX?: boolean
   contentWidth?: number
   scrollRef?: Ref<HTMLDivElement>
+  // False hides the zoom/fit/scale controls (a small graph that always
+  // shows at its own size).
+  controls?: boolean
 }
 
 const MIN_SCALE = 0.1
@@ -50,7 +53,7 @@ const CONTROLS_GAP = 8
 // cover the bottom of the graph.
 const SCROLLBAR_ALLOWANCE = 14
 
-export default function GraphFrame({ children, zoom, onExpand, className, contentClassName, label = 'Graph', height: externalHeight, scrollX, contentWidth, scrollRef }: Props) {
+export default function GraphFrame({ children, zoom, onExpand, className, contentClassName, label = 'Graph', height: externalHeight, scrollX, contentWidth, scrollRef, controls = true }: Props) {
   const frameRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const controlsRef = useRef<HTMLDivElement>(null)
@@ -178,6 +181,7 @@ export default function GraphFrame({ children, zoom, onExpand, className, conten
           {children}
         </div>
       )}
+      {controls && (
       <div ref={controlsRef} className={styles.controls}>
         <button type="button" className={styles.controlBtn} onClick={doZoomIn} aria-label="Zoom in" title="Zoom in">+</button>
         <button type="button" className={styles.controlBtn} onClick={doZoomOut} aria-label="Zoom out" title="Zoom out">−</button>
@@ -187,6 +191,7 @@ export default function GraphFrame({ children, zoom, onExpand, className, conten
         )}
         <span className={styles.level}>{Math.round(level * 100)}%</span>
       </div>
+      )}
     </div>
   )
 }

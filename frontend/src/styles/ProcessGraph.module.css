@@ -1,0 +1,84 @@
+/* Setup's live process graph (ProcessGraph.tsx). Same card as the brief
+   graph; the border and text weight say where each step is. */
+.node {
+  width: 190px;
+  padding: 0.5rem 0.65rem;
+  border-radius: 8px;
+  background: var(--color-surface);
+  border: 1px solid var(--graph-20);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  font-family: inherit;
+}
+
+.node_pending { opacity: 0.55; }
+.node_skipped { opacity: 0.7; }
+.node_done { border-color: var(--graph-50); }
+.node_active { border-color: var(--graph-80); background: var(--graph-10); }
+.node_error { border-color: var(--graph-100); border-width: 2px; background: var(--graph-10); }
+
+/* Setup-step nodes open their step. */
+.nodeLink { cursor: pointer; }
+.nodeLink:hover { border-color: var(--graph-80); opacity: 1; }
+
+/* The step that's open: a ring just outside the card, darkest ink, and
+   full strength even if the step is still pending. */
+.nodeSelected,
+.nodeSelected:hover {
+  opacity: 1;
+  border-color: var(--graph-100);
+  box-shadow: 0 0 0 2px var(--color-surface), 0 0 0 4px var(--graph-100);
+}
+
+.nodeTitle {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: var(--graph-100);
+  overflow-wrap: anywhere;
+}
+
+.nodeState {
+  font-size: 0.8rem;
+  color: var(--graph-65);
+}
+
+.node_error .nodeState { color: var(--graph-100); }
+
+.nodeText {
+  margin: 0.3rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--graph-100);
+}
+
+.nodeList {
+  margin: 0.3rem 0 0;
+  padding-left: 1rem;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--graph-100);
+}
+
+.nodeList li + li {
+  margin-top: 0.15rem;
+}
+
+.spinner {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border: 2px solid var(--graph-20);
+  border-top-color: var(--graph-80);
+  border-radius: 50%;
+  animation: processSpin 0.8s linear infinite;
+}
+
+@keyframes processSpin {
+  to { transform: rotate(360deg); }
+}
+
+.edgePending :global(.react-flow__edge-path) {
+  stroke-dasharray: 4 4;
+  opacity: 0.6;
+}
