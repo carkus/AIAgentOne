@@ -3165,3 +3165,8 @@
   inset: auto;
   min-height: 100px;
 }
+
+/* "Build your agent" heading sits 5px in from the panel's left edge. */
+.processGraphPanel .fieldLabelToggle .fieldLabel {
+  margin-left: 5px;
+}
