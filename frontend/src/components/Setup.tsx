@@ -190,11 +190,9 @@ const SETUP_STEPS: { id: SetupStepId; label: string; help: string }[] = [
 // Step navigation for the setup card: a breadcrumb of the step names, each
 // one clickable. Steps aren't gated, so the user can jump straight to any
 // of them.
-function SetupSteps({ active, onSelect, dossierOpen, onDossier }: {
+function SetupSteps({ active, onSelect }: {
   active: SetupStepId
   onSelect: (id: SetupStepId) => void
-  dossierOpen: boolean
-  onDossier: () => void
 }) {
   return (
     <nav className={styles.stepCrumbs} aria-label="Agent setup steps">
@@ -216,17 +214,6 @@ function SetupSteps({ active, onSelect, dossierOpen, onDossier }: {
           </li>
         ))}
       </ol>
-      {/* Manila folder tab at the far end: opens the Agent Dossier drawer. */}
-      <button
-        type="button"
-        className={`${styles.dossierFolderTab} ${dossierOpen ? styles.dossierFolderTabOpen : ''}`}
-        onClick={onDossier}
-        aria-expanded={dossierOpen}
-        aria-controls="agentSetupForm"
-        title={dossierOpen ? 'Close the Agent Dossier' : 'Open the Agent Dossier: saved focus, drafts, chats and published agents'}
-      >
-        Dossier
-      </button>
     </nav>
   )
 }
@@ -1594,8 +1581,6 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
           <SetupSteps
             active={setupStep}
             onSelect={setSetupStep}
-            dossierOpen={dossierOpen}
-            onDossier={() => setDossierOpen(o => !o)}
           />
             {/* While deploying, just the deploy stages, so the live ones
                 aren't scrolled off to the right of the Setup steps. */}

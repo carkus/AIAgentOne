@@ -24,7 +24,7 @@
   background: none;
   border: none;
   padding: 0;
-  margin: -18px 0 0.75rem;
+  margin: 2px 0 0.75rem;
   cursor: pointer;
   line-height: 0;
   opacity: 1;
@@ -1109,8 +1109,8 @@
   gap: 0.5rem;
   background: rgba(242, 239, 233, 0.75);
   border-radius: 8px;
-  color: #16324a;
-  font-size: 0.85rem;
+  color: var(--graph-50);
+  font-size: 0.9em;
   font-weight: 500;
 }
 
@@ -1136,9 +1136,9 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin: 0 0 0.35rem;
-  color: #6b7785;
-  font-size: 0.85rem;
+  margin: 0 0 0.175rem;
+  color: var(--graph-50);
+  font-size: 0.9em;
 }
 
 /* "Written brief for Agent": the prose brief, folded under the brief graph. */
@@ -1167,8 +1167,12 @@
 }
 
 .briefLoadingHint {
-  color: #8a8572;
+  color: var(--graph-50);
   font-style: italic;
+  /* Half a paragraph's default 1em top/bottom margin. */
+  margin: 0.5em 0;
+  /* Same size as .outputsIntro: every status line in the steps matches. */
+  font-size: 0.9em;
 }
 
 /* Empty-state hint shown before any Specialty exists — a dashed-border card
