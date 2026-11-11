@@ -1,4 +1,4 @@
-# Kills whatever is squatting on AIAgent's backend + frontend ports, then
+# Kills whatever is squatting on AgentOne's backend + frontend ports, then
 # starts both. Backend port is set by backend/server.py's PORT env var
 # (default 4891); frontend port is set by frontend/vite.config.ts's
 # server.port (strictPort: true there, so keep this in sync with it).

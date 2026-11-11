@@ -442,7 +442,7 @@ export interface PublishedAgent {
 /** Published agents — server-side registry (backend/src/agent_registry.py)
  * backing the MCP server (backend/mcp_server.py), which exposes each one as
  * an MCP tool other MCP clients (Claude Desktop, Claude Code, another
- * AIAgent instance) can call. [] on any failure, same degrade-quietly shape
+ * AgentOne instance) can call. [] on any failure, same degrade-quietly shape
  * as listSavedSearches(). */
 export async function listPublishedAgents(): Promise<PublishedAgent[]> {
   try {

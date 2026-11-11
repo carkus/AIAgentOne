@@ -85,9 +85,9 @@ The server reads `env.json` on startup and hot-reloads when you edit files in `b
 
 ## Step 4.5 — Start the MCP server (Terminal 3, optional)
 
-Only needed if you want to test AIAgent's own MCP-server side (published
+Only needed if you want to test AgentOne's own MCP-server side (published
 agents exposed as MCP tools other clients can call — see
-[CLAUDE.md](./CLAUDE.md)'s "AIAgent as an MCP server" section). It's a
+[CLAUDE.md](./CLAUDE.md)'s "AgentOne as an MCP server" section). It's a
 separate process from the Flask backend, since the `mcp` SDK's HTTP
 transport is ASGI, not WSGI:
 

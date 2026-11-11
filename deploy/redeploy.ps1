@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Redeploy AIAgent to the carkus.com droplet after a code change.
+  Redeploy AgentOne to the carkus.com droplet after a code change.
   PowerShell equivalent of redeploy.sh — use this one from PowerShell so
   Windows doesn't try to "open" the .sh file with a program picker.
 

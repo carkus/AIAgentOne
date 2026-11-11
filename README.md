@@ -72,7 +72,7 @@ The agent remembers everything. The full conversation history travels with every
 
 A bootstrapped agent that's actually been exercised in chat can also be
 **published** as a standing MCP tool (`backend/mcp_server.py`, its own
-process), so any MCP client — Claude Desktop, Claude Code, another AIAgent
+process), so any MCP client — Claude Desktop, Claude Code, another AgentOne
 instance — can call it directly, not just this project's own frontend.
 
 ---

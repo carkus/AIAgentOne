@@ -1,4 +1,4 @@
-# Deploying AIAgent to the carkus.com droplet
+# Deploying AgentOne to the carkus.com droplet
 
 Confirmed against the actual droplet (not assumed):
 

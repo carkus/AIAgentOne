@@ -20,8 +20,8 @@ Two phases:
 The frontend is one consumer of a bootstrapped agent, not the only one: an
 explicit **publish** step (`POST /agents`, "Publish as MCP tool" in `Chat.tsx`)
 exposes a chosen agent as a callable MCP tool via `backend/mcp_server.py`, so
-any MCP client — Claude Desktop, Claude Code, jobfit, another AIAgent
-instance — can call it directly (see Backend Patterns' "AIAgent as an MCP
+any MCP client — Claude Desktop, Claude Code, jobfit, another AgentOne
+instance — can call it directly (see Backend Patterns' "AgentOne as an MCP
 server"). This was the project's other stated main goal alongside the React
 UI, not an add-on.
 
@@ -47,7 +47,7 @@ A **second, structurally separate process** — `backend/mcp_server.py` — runs
 alongside `server.py`, not as routes on it (the `mcp` SDK's HTTP transports
 are Starlette/ASGI-only; Flask/gunicorn is WSGI). It reuses `run_agent_stream`
 directly, the same execution path the Flask `/agent` route drives — see
-Backend Patterns' "AIAgent as an MCP server".
+Backend Patterns' "AgentOne as an MCP server".
 
 An AWS SAM/Lambda path (`template.yaml`, `backend/src/handler.py`) still
 exists in the repo but is **dev-only tooling now** (`sam local`), not what's
@@ -281,7 +281,7 @@ A tool whose definition carries `source: "mcp"` skips this entirely — `agent_s
 Root `c:\_work\CLAUDE.md`'s stated AI-discipline gap around reinforcement
 learning is closed here, not in jobfit — jobfit has no persisted
 appraisal-history data to learn from (verified directly: no DB, no
-persisted job-description/appraisal pairs), while AIAgent already had a
+persisted job-description/appraisal pairs), while AgentOne already had a
 self-evaluation layer (`eval_checks.py`/`eval_log.py`) recording pass/fail
 history for every bootstrap, chat response, tool call, and worker
 delegation. That history just wasn't attributable to *which* provider/model
@@ -557,12 +557,12 @@ tool-usage basics:
   (previously a plain `<p>`, so a worker's markdown — bold, lists, links —
   showed as literal syntax instead of being formatted).
 
-### AIAgent as an MCP server
+### AgentOne as an MCP server
 
-Root `c:\_work\CLAUDE.md` Gaps item 4's reverse direction: AIAgent already
+Root `c:\_work\CLAUDE.md` Gaps item 4's reverse direction: AgentOne already
 speaks MCP as a *client* (above); `backend/mcp_server.py` makes it an MCP
 *server* too, exposing bootstrapped agents as tools any MCP client (Claude
-Desktop, Claude Code, jobfit, another AIAgent instance) can call directly —
+Desktop, Claude Code, jobfit, another AgentOne instance) can call directly —
 mirroring jobfit's own `/mcp` endpoint.
 
 - **Publish is explicit, not automatic.** `POST /agents` (`server.py`) saves
@@ -737,7 +737,7 @@ only for `sam local` dev and is not deployed anywhere. Full first-time setup
 and rationale: [`DEPLOY.md`](./DEPLOY.md).
 
 - Backend runs as `gunicorn server:app` under the `aiagent` systemd unit (`deploy/aiagent.service`), 1 worker process × 16 threads = up to 16 agents running at once (each streaming `/agent` request holds one thread for its whole loop). One worker because each process costs ~90MB and the 1GB droplet was already swapping; adding workers later is safe since every store, rate-limit counters included, is in SQLite (`db.py`)
-- The MCP server (`backend/mcp_server.py`) runs as a **separate** `uvicorn mcp_server:app` process under its own `aiagent-mcp` systemd unit (`deploy/aiagent-mcp.service`), port `8788` — a structurally distinct ASGI process from gunicorn's WSGI one, not another route on it (see Backend Patterns' "AIAgent as an MCP server")
+- The MCP server (`backend/mcp_server.py`) runs as a **separate** `uvicorn mcp_server:app` process under its own `aiagent-mcp` systemd unit (`deploy/aiagent-mcp.service`), port `8788` — a structurally distinct ASGI process from gunicorn's WSGI one, not another route on it (see Backend Patterns' "AgentOne as an MCP server")
 - nginx (`deploy/nginx-aiagent.conf`) serves the built frontend and reverse-proxies `/bootstrap`, `/agent`, `/models`, `/file/`, `/agents` to gunicorn on `127.0.0.1:8787`, and `/mcp` to uvicorn on `127.0.0.1:8788`; one shared HTTP Basic Auth login gates the whole app (frontend + both APIs)
 - Production is **Gemini-only for chat/bootstrap** — the droplet's existing Ollama instance is sized for a different app's tiny fallback model and can't fit this app's bootstrap-quality model. Image generation is unaffected: `HF_API_TOKEN` in the same `.env` gives it a free, non-Gemini fallback (see `DEPLOY.md`), so Gemini isn't required for that feature to work in prod.
 - Secrets live in `/var/www/aiagent/.env` (`EnvironmentFile=`, mode 600), not inline in the unit file
@@ -879,7 +879,7 @@ job the user can return to. Builds on Product Direction above and output
 relics. Note the standing "prefer stateless" preference — a job store is a
 deliberate, scoped exception to raise with the user before building.
 
-### 5. Cross-project agents — jobfit as AIAgent's MCP client
+### 5. Cross-project agents — jobfit as AgentOne's MCP client
 Close root `CLAUDE.md` priority 8(c): jobfit calls `jobfit_fit_assessor` over
 MCP, with `Fallbacks.cs` as the safety net.
 
@@ -897,13 +897,13 @@ Five forward-looking directions for this project. Captured here as work to accom
 `orchestrator.py`'s `run_worker()` + `agent_stream.py`'s `delegate_to_worker` tool implement the basic version: the main agent can spin up a worker agent (bootstrapped via the same `generate_agent_config` call, own name/personality/toolset, `is_worker=True`) to own one self-contained subtask and hand back its finished result — one level deep, synchronous, capped at `MAX_DELEGATIONS_PER_REQUEST` per turn (default `3`, overridable in Settings — see `agent_stream.py`'s module docstring for the deliberate scope limits). The prompt wording now treats "one worker per named keyword/topic" as the normal way to handle a multi-part request, not a rare exception — see Backend Patterns' "Output style: diagrams over prose, and delegation defaults" above for why that changed. Not yet done: a planner agent that decomposes the task itself (today the *main* agent decides when/what to delegate via its own judgment, there's no separate planning phase), recursive sub-worker spawning, and a supervisor pattern beyond "main agent reads the worker's result and continues."
 
 ### 2. A2A protocol
-AIAgent's dynamically-generated agents are a good target for making A2A-discoverable, since each one already has a defined role/tools. Two AIAgent-spawned agents negotiating a task over A2A instead of just sharing memory internally would be a clean proof-of-concept, and it's a step up from bolting A2A onto Jobfit's fixed three tools.
+AgentOne's dynamically-generated agents are a good target for making A2A-discoverable, since each one already has a defined role/tools. Two AgentOne-spawned agents negotiating a task over A2A instead of just sharing memory internally would be a clean proof-of-concept, and it's a step up from bolting A2A onto Jobfit's fixed three tools.
 
 ### 3. Agent memory/context engineering
 You've already got "full conversation memory across follow-ups." The freeform extension: memory that persists and is reasoned about across completely different spawned agents — shared long-term memory vs. per-agent scratch memory, summarization/compaction as context grows. Rigid pipelines like Jobfit don't really surface this problem; open-ended agent spawning does.
 
 ### 4. Governance/guardrails
-Since AIAgent generates Python implementations on the fly, this is actually a sharper testbed than Jobfit for sandboxing and permissioning (what can a dynamically-written tool be allowed to touch?), which is a much more interesting guardrails story than gating three known tools.
+Since AgentOne generates Python implementations on the fly, this is actually a sharper testbed than Jobfit for sandboxing and permissioning (what can a dynamically-written tool be allowed to touch?), which is a much more interesting guardrails story than gating three known tools.
 
 ### 5. Deployment breadth
-Lambda suits AIAgent's request/response scaffolding well, but if you add persistent multi-agent state or long-running orchestration, that's your excuse to stand up an ECS/Fargate or GKE variant and genuinely compare the two, rather than picking one because it's "the AWS option."
+Lambda suits AgentOne's request/response scaffolding well, but if you add persistent multi-agent state or long-running orchestration, that's your excuse to stand up an ECS/Fargate or GKE variant and genuinely compare the two, rather than picking one because it's "the AWS option."

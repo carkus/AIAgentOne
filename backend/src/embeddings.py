@@ -7,7 +7,7 @@ inline cosine similarity used for a linear in-memory scan (see
 bootstrap_memory.py) — proportionate to this project's scale (at most a few
 hundred stored bootstraps).
 
-Unlike ChattyPrayers.Api (which only has an Ollama embedding path), AIAgent's
+Unlike ChattyPrayers.Api (which only has an Ollama embedding path), AgentOne's
 production is Gemini-only (see CLAUDE.md Deployment), so this also has to work
 without Ollama: Gemini's OpenAI-compatible surface serves embeddings at the
 same base_url llm_client.py already uses for chat completions

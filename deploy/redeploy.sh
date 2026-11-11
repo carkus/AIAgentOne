@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Redeploy AIAgent to the carkus.com droplet after a code change.
+# Redeploy AgentOne to the carkus.com droplet after a code change.
 #
 # No git on the droplet (code was tar'd up, not cloned) and no CI — this
 # script exists so "ship a change" is one command instead of re-deriving the

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Redeploy AIAgent to the carkus.com droplet after a code change.
+  Redeploy AgentOne to the carkus.com droplet after a code change.
   Root-level entry point, matching the `.\deploy.ps1` convention used by the
   other projects in this workspace — forwards to deploy\redeploy.ps1, which
   holds the actual tar/scp/restart logic (shared with redeploy.sh for
