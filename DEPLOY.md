@@ -53,8 +53,8 @@ Create this as the `aiagent` user, mode 600 — **not** inline `Environment=` li
 sudo -u aiagent tee /var/www/aiagent/.env > /dev/null <<'EOF'
 GEMINI_API_KEY=<real key>
 HF_API_TOKEN=<real huggingface token — free account, no billing>
-CLOUDFLARE_ACCOUNT_ID=<optional — Workers AI: hosted Qwen chat models + generate_image's last fallback>
-CLOUDFLARE_API_TOKEN=<optional — token with the Workers AI permission>
+CLOUDFLARE_ACCOUNT_ID=<required — Workers AI is the main chat provider since Gemini was dropped (2026-11-12)>
+CLOUDFLARE_API_TOKEN=<required — token with the Workers AI permission>
 TAVILY_API_KEY=<optional — general web search MCP server; without it agents have no web search>
 DISABLE_OLLAMA=1
 ADZUNA_APP_ID=<real id>
