@@ -1,4 +1,4 @@
-import type { AgentConfig, AgentSpec, AgentTemplateId, ArmStat, BootstrapStreamEvent, Deliverable, EvalResultItem, LlmProvider, RelicSuggestion, SavedChatMessage, StreamEvent } from './types';
+import type { AgentConfig, AgentSpec, AgentTemplateId, ArmStat, BootstrapStreamEvent, Deliverable, EvalResultItem, LlmProvider, RelicKind, RelicSuggestion, SavedChatMessage, StreamEvent } from './types';
 
 const API_URL = import.meta.env.VITE_API_URL ?? '';
 
@@ -437,7 +437,21 @@ export interface AgentDraft {
   location: string;
   traits: string[];
   behaviorToggles?: string[];
+  /** Absent on profiles saved before these were kept. */
+  factorLocation?: boolean;
+  outputs?: RelicKind[];
+  /** The agent as last built from this profile; reloading it skips
+   * bootstrap. Absent when it was never deployed, or the steps changed since. */
+  builtConfig?: AgentConfig;
   savedAt: number;
+}
+
+/** The parts of a profile beyond name/type/focus/location/character. */
+export interface AgentDraftExtras {
+  factorLocation?: boolean;
+  outputs?: RelicKind[];
+  /** null clears a stale build; leave out to keep whatever is stored. */
+  builtConfig?: AgentConfig | null;
 }
 
 /** Saved agent profiles — the pre-bootstrap draft (name, type, location,
@@ -464,11 +478,12 @@ export async function createAgentDraft(
   location: string,
   traits: string[],
   behaviorToggles: string[] = [],
+  extras?: AgentDraftExtras,
 ): Promise<AgentDraft> {
   const res = await fetch(`${API_URL}/agent-drafts`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ agentName, agentType, keywords, location, traits, behaviorToggles }),
+    body: JSON.stringify({ agentName, agentType, keywords, location, traits, behaviorToggles, ...extras }),
   });
   if (!res.ok) throw new Error('Failed to save agent profile');
   return res.json();
@@ -484,11 +499,12 @@ export async function updateAgentDraft(
   location: string,
   traits: string[],
   behaviorToggles: string[] = [],
+  extras?: AgentDraftExtras,
 ): Promise<AgentDraft> {
   const res = await fetch(`${API_URL}/agent-drafts/${encodeURIComponent(id)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ agentName, agentType, keywords, location, traits, behaviorToggles }),
+    body: JSON.stringify({ agentName, agentType, keywords, location, traits, behaviorToggles, ...extras }),
   });
   if (!res.ok) throw new Error('Failed to update agent profile');
   return res.json();

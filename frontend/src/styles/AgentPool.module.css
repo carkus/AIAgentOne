@@ -1,0 +1,295 @@
+/* "Load a previous agent" at the top of Setup's Character step.
+   No borders on pills or tags (no badge borders in new work). */
+
+.pool {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.loadedBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.55rem 0.7rem;
+  background: rgba(1, 71, 146, 0.07);
+  border-radius: 6px;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+}
+
+.loadedText {
+  flex: 1;
+  min-width: 0;
+}
+
+.loadedText strong {
+  font-weight: 600;
+}
+
+.linkBtn {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-accent);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}
+
+.linkBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.how {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.howToggle {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-muted);
+  cursor: pointer;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.howList {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+}
+
+.howList strong {
+  font-weight: 600;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.filters {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.filter,
+.filterActive {
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-size-xs);
+  padding: 0.25rem 0.7rem;
+}
+
+.filter {
+  background: rgba(40, 75, 106, 0.08);
+  color: var(--color-text);
+}
+
+.filterActive {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.search {
+  flex: 1 1 12rem;
+  min-width: 0;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 0.35rem 0.6rem;
+}
+
+.empty {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.5rem;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+  padding: 0.6rem 0.7rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.cardLoaded {
+  border-color: var(--color-accent);
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.kindProfile,
+.kindJob {
+  flex-shrink: 0;
+  border-radius: 4px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.4rem;
+}
+
+.kindProfile {
+  background: #f0e9d2;
+  color: var(--color-dossier-text);
+}
+
+.kindJob {
+  background: rgba(1, 71, 146, 0.1);
+  color: var(--color-accent);
+}
+
+.loadedTag {
+  flex-shrink: 0;
+  color: var(--color-accent);
+  font-size: var(--font-size-xs);
+}
+
+.meta {
+  color: var(--color-muted);
+  font-size: var(--font-size-xs);
+}
+
+.preview {
+  color: var(--color-muted);
+  font-size: var(--font-size-xs);
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.focusPill,
+.characterPill {
+  border-radius: var(--radius-control);
+  font-size: var(--font-size-xs);
+  padding: 0.1rem 0.5rem;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.focusPill {
+  background: rgba(40, 75, 106, 0.1);
+  color: var(--color-accent);
+}
+
+.characterPill {
+  background: #f0e9d2;
+  color: var(--color-dossier-text);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: auto;
+  padding-top: 0.25rem;
+}
+
+.primaryBtn,
+.secondaryBtn {
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-size-xs);
+  padding: 0.25rem 0.8rem;
+}
+
+.primaryBtn {
+  background: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  color: #fff;
+}
+
+.primaryBtn:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.secondaryBtn {
+  background: var(--color-surface);
+  border: 1px solid var(--color-accent);
+  color: var(--color-accent);
+}
+
+.removeBtn {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--color-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-size-xs);
+  padding: 0.25rem 0.2rem;
+}
+
+.removeBtn:hover:not(:disabled) {
+  color: #b91c1c;
+}
+
+.primaryBtn:disabled,
+.secondaryBtn:disabled,
+.removeBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

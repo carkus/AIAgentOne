@@ -359,7 +359,7 @@ def agent_drafts_collection():
     location = body.get("location") or ""
     traits = body.get("traits") or []
     behavior_toggles = body.get("behaviorToggles") or []
-    entry = agent_drafts.add_draft(agent_name, agent_type, keywords, location, traits, behavior_toggles)
+    entry = agent_drafts.add_draft(agent_name, agent_type, keywords, location, traits, behavior_toggles, body)
     return jsonify(entry), 201
 
 
@@ -385,6 +385,7 @@ def agent_drafts_item(draft_id):
         body.get("location") or "",
         body.get("traits") or [],
         body.get("behaviorToggles") or [],
+        body,
     )
     if entry is None:
         return jsonify({"error": "Saved agent profile not found"}), 404

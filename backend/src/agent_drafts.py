@@ -10,10 +10,44 @@ Stored in the shared SQLite database (db.py, table agent_drafts), same
 pattern as saved_searches.py.
 """
 
+import json
 import time
 import uuid
 
 import db
+
+
+def _clean_extras(extras: dict | None) -> dict:
+    """The rest of what reloading a profile needs: the Factor-in-location
+    switch and the outputs picked on the Outputs step. Only well-formed
+    values are kept; an older profile simply lacks them."""
+    extras = extras or {}
+    out = {}
+    if isinstance(extras.get("factorLocation"), bool):
+        out["factorLocation"] = extras["factorLocation"]
+    outputs = extras.get("outputs")
+    if isinstance(outputs, list):
+        out["outputs"] = [o for o in outputs if isinstance(o, str)][:12]
+    # The agent as last built from this profile (a full AgentConfig), so
+    # reloading it skips bootstrap. Explicit null clears it: the steps
+    # changed, so the old build no longer matches.
+    if "builtConfig" in extras:
+        built = extras["builtConfig"]
+        if isinstance(built, dict) and len(json.dumps(built)) <= _MAX_BUILT_BYTES:
+            out["builtConfig"] = built
+        elif built is None:
+            out["builtConfig"] = None
+    return out
+
+
+_MAX_BUILT_BYTES = 400_000
+
+
+def _apply(entry: dict) -> dict:
+    """Drops a cleared builtConfig rather than storing null."""
+    if entry.get("builtConfig") is None:
+        entry.pop("builtConfig", None)
+    return entry
 
 
 def _insert(conn, entry: dict) -> None:
@@ -51,6 +85,7 @@ def add_draft(
     location: str,
     traits: list,
     behavior_toggles: list | None = None,
+    extras: dict | None = None,
 ) -> dict:
     entry = {
         "id": uuid.uuid4().hex,
@@ -60,8 +95,10 @@ def add_draft(
         "location": location,
         "traits": traits,
         "behaviorToggles": behavior_toggles or [],
+        **_clean_extras(extras),
         "savedAt": int(time.time() * 1000),
     }
+    _apply(entry)
     _migrate()
     with db.write() as conn:
         # Same name+type+keywords+location saved again is a distinct-entry
@@ -87,6 +124,7 @@ def update_draft(
     location: str,
     traits: list,
     behavior_toggles: list | None = None,
+    extras: dict | None = None,
 ) -> dict | None:
     """Edits a saved profile in place (same id, moved to the top). Returns
     None when the id no longer exists, so the caller can fall back to add."""
@@ -103,8 +141,10 @@ def update_draft(
             "location": location,
             "traits": traits,
             "behaviorToggles": behavior_toggles or [],
+            **_clean_extras(extras),
             "savedAt": int(time.time() * 1000),
         }
+        _apply(entry)
         # Delete + insert rather than UPDATE so seq (the list order) moves
         # it to the top, like a fresh save.
         conn.execute("DELETE FROM agent_drafts WHERE id = ?", (draft_id,))

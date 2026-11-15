@@ -15,6 +15,7 @@ import type { ColumnNode } from './ColumnGraph'
 import SettingsModal from './SettingsModal'
 import ThemePicker from './ThemePicker'
 import AgentStableModal from './AgentStableModal'
+import AgentPool from './AgentPool'
 import ScoreboardModal from './ScoreboardModal'
 import LocationMapModal from './LocationMapModal'
 import CharacterGenerator from './CharacterGenerator'
@@ -27,6 +28,40 @@ import { downloadRelic, RELIC_KINDS, RELIC_LABELS, relicFilename } from '../reli
 // Mono line icons matching the app's stroke-based visual style — plain
 // geometric shapes (magnifier / briefcase / compass), not emoji, so they
 // pick up the pill's currentColor and stay crisp at any size.
+// What a built agent was built from: every step that changes its bootstrap.
+// A saved agent whose key matches the current steps can be reused as it is
+// instead of being built again. Provider/model aren't part of it: they only
+// choose who runs the agent, so a reused agent takes the current choice.
+interface BuildInputs {
+  template: AgentTemplateId
+  keywords: string[]
+  location: string
+  factorLocation: boolean
+  toggles: string[]
+  traits: string[]
+  outputs: string[]
+}
+
+function buildKey(b: BuildInputs): string {
+  const sorted = (xs: string[]) => [...xs].sort()
+  return JSON.stringify([
+    b.template, sorted(b.keywords), b.location.trim(), b.factorLocation,
+    sorted(b.toggles), sorted(b.traits), sorted(b.outputs),
+  ])
+}
+
+function configBuildKey(cfg: AgentConfig): string {
+  return buildKey({
+    template: cfg.template ?? 'research',
+    keywords: cfg.keywords ?? [],
+    location: cfg.location ?? '',
+    factorLocation: cfg.factor_location ?? false,
+    toggles: cfg.active_toggles ?? [],
+    traits: cfg.active_traits ?? [],
+    outputs: (cfg.deliverables ?? []).map(d => d.kind),
+  })
+}
+
 function AgentTypeIcon({ id }: { id: AgentTemplateId }) {
   const common = {
     viewBox: '0 0 24 24',
@@ -95,11 +130,24 @@ function ToolsIcon() {
 // before any research, so there are no numbers to chart.
 const SETUP_TOOLBAR_ITEMS: ToolbarItem[] = [
   { id: 'save', label: 'Save agent', group: 'controls', locked: true },
+  { id: 'pool', label: 'Agent pool', group: 'controls' },
   { id: 'open', label: 'Open agent', group: 'controls' },
   { id: 'advanced', label: 'Advanced setup', group: 'controls' },
   ...(['pdf', 'docx', 'markdown', 'slides', 'diagram', 'json'] as RelicKind[])
     .map(kind => ({ id: kind, label: RELIC_LABELS[kind], group: 'outputs' })),
 ]
+
+// Stacked cards: the saved agents to reload.
+function AgentPoolIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="8" width="14" height="12" rx="1.5" />
+      <path d="M7 5h12.5A1.5 1.5 0 0 1 21 6.5V16" />
+      <circle cx="10" cy="12.5" r="2" />
+      <path d="M6.5 18a3.5 3.5 0 0 1 7 0" />
+    </svg>
+  )
+}
 
 function OpenAgentIcon() {
   return (
@@ -498,6 +546,13 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
   // a "Job search agent" list of keywords isn't a useful preset when you're
   // building a "Research agent". Pre-existing saves have no agentType and
   // are treated as 'research'.
+  // The saved profile or job the form was loaded from, for the line under
+  // the agent name.
+  const loadedEntryName = editing?.kind === 'draft'
+    ? drafts.find(d => d.id === editing.id)?.agentName
+    : editing?.kind === 'chat'
+      ? savedChats.find(c => c.id === editing.id)?.agentName
+      : undefined
   const visibleDrafts = drafts.filter(d => (d.agentType ?? 'research') === agentType)
   // Flattened, deduped, alphabetical pool of every keyword across every
   // saved search, shared by all three agent types — each one is its own
@@ -535,6 +590,13 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [themePickerOpen, setThemePickerOpen] = useState(false)
   const [stableModalOpen, setStableModalOpen] = useState(false)
+  const [poolOpen, setPoolOpen] = useState(false)
+  useEffect(() => {
+    if (!poolOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPoolOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [poolOpen])
   const [scoreboardOpen, setScoreboardOpen] = useState(false)
   const [locationMapOpen, setLocationMapOpen] = useState(false)
   const [characterGenOpen, setCharacterGenOpen] = useState(false)
@@ -592,6 +654,9 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
   // out (the debounce window), so the outputs wait for the new brief.
   const [briefScheduled, setBriefScheduled] = useState(false)
   const [chosenOutputs, setChosenOutputs] = useState<RelicKind[]>([])
+  // Outputs from a reloaded profile or job. They stand in as the choice
+  // until the Outputs step proposes again, then become its ticks.
+  const [restoredOutputs, setRestoredOutputs] = useState<{ kind: RelicKind; title: string }[] | null>(null)
   const outputsKeyRef = useRef('')
   const outputsRequestIdRef = useRef(0)
   const [answeringBrief, setAnsweringBrief] = useState(false)
@@ -836,9 +901,18 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     fetchBriefOutputs([...keywords], aiBrief?.type === 'brief' ? aiBrief.text : '', agentType, traitLabels, behaviorLabels, provider, activeModel)
       .then(outputs => {
         if (requestId !== outputsRequestIdRef.current) return
-        setOutputProposals(outputs)
+        if (restoredOutputs) {
+          // A reloaded agent keeps its own picks, even ones the agent
+          // didn't propose this time.
+          const missing = outputs ? restoredOutputs.filter(r => !outputs.some(o => o.kind === r.kind)) : []
+          setOutputProposals(outputs ? [...outputs, ...missing] : null)
+          setChosenOutputs(restoredOutputs.map(r => r.kind))
+          setRestoredOutputs(null)
+        } else {
+          setOutputProposals(outputs)
+          setChosenOutputs(outputs ? outputs.filter(o => o.recommended).map(o => o.kind) : [])
+        }
         setOutputsFailed(outputs === null)
-        setChosenOutputs(outputs ? outputs.filter(o => o.recommended).map(o => o.kind) : [])
         setOutputsLoading(false)
       })
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -848,9 +922,31 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
   // when proposing failed.
   const outputOptions: Deliverable[] = outputProposals
     ?? (outputsFailed ? RELIC_KINDS.map(kind => ({ kind, title: RELIC_LABELS[kind] })) : [])
-  const chosenDeliverables = outputOptions
-    .filter(o => chosenOutputs.includes(o.kind))
-    .map(({ kind, title }) => ({ kind, title }))
+  const chosenDeliverables = restoredOutputs
+    ?? outputOptions
+      .filter(o => chosenOutputs.includes(o.kind))
+      .map(({ kind, title }) => ({ kind, title }))
+
+  // The loaded profile's or job's built agent, when the steps still match
+  // what it was built from: Deploy then opens it straight away instead of
+  // building it again. Change any step and it's null, so Deploy rebuilds.
+  const currentTraitIds = (PERSONALITY_TRAITS[agentType] ?? PERSONALITY_TRAITS.research)
+    .filter(t => selectedTraits.includes(t.id)).map(t => t.id)
+  const currentBuildKey = buildKey({
+    template: agentType,
+    keywords,
+    location: usedLocation,
+    factorLocation,
+    toggles: activeToggles,
+    traits: currentTraitIds,
+    outputs: chosenDeliverables.map(d => d.kind),
+  })
+  const loadedBuild: AgentConfig | undefined = editing?.kind === 'draft'
+    ? drafts.find(d => d.id === editing.id)?.builtConfig
+    : editing?.kind === 'chat'
+      ? savedChats.find(c => c.id === editing.id)?.agentConfig
+      : undefined
+  const reusableConfig = loadedBuild && configBuildKey(loadedBuild) === currentBuildKey ? loadedBuild : null
 
   function toggleOutput(kind: RelicKind) {
     setChosenOutputs(prev => prev.includes(kind) ? prev.filter(k => k !== kind) : [...prev, kind])
@@ -1035,6 +1131,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     setSelectedTraits([])
     setAiBrief(null)
     setBriefAnswer('')
+    setRestoredOutputs(null)
     setCommissionHint(null)
     setDossierOpen(false)
     inputRef.current?.focus()
@@ -1183,13 +1280,15 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     if (editing?.kind === 'chat' && saveChatEdits(editing.id)) return
     const traitPool = PERSONALITY_TRAITS[agentType] ?? PERSONALITY_TRAITS.research
     const traits = traitPool.filter(t => selectedTraits.includes(t.id)).map(t => t.label)
+    // Keep the built agent only while it still matches these steps.
+    const extras = { factorLocation, outputs: chosenDeliverables.map(d => d.kind), builtConfig: reusableConfig }
     try {
       let updated: AgentDraft | null = null
       if (editing?.kind === 'draft') {
         // A profile deleted elsewhere 404s here; fall through and create it.
-        updated = await updateAgentDraft(editing.id, agentName, agentType, [...keywords], location.trim(), traits, [...activeToggles]).catch(() => null)
+        updated = await updateAgentDraft(editing.id, agentName, agentType, [...keywords], location.trim(), traits, [...activeToggles], extras).catch(() => null)
       }
-      const entry = updated ?? await createAgentDraft(agentName, agentType, [...keywords], location.trim(), traits, [...activeToggles])
+      const entry = updated ?? await createAgentDraft(agentName, agentType, [...keywords], location.trim(), traits, [...activeToggles], extras)
       setEditing({ kind: 'draft', id: entry.id })
       setDrafts(prev => [
         entry,
@@ -1224,6 +1323,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
       factor_location: factorLocation,
       active_toggles: [...activeToggles],
       active_traits: [...selectedTraits],
+      deliverables: chosenDeliverables.length > 0 ? chosenDeliverables : chat.agentConfig.deliverables,
     }
     setSavedChats(saveChat({ ...chat, agentName, agentConfig, savedAt: Date.now() }))
     setOpenSavedSections(prev => ({ ...prev, chats: true }))
@@ -1237,7 +1337,10 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     setEditing({ kind: 'draft', id: d.id })
     const type = d.agentType ?? 'research'
     setAgentType(type)
-    setFactorLocation(type === 'job_search')
+    setFactorLocation(d.factorLocation ?? type === 'job_search')
+    setRestoredOutputs(d.outputs && d.outputs.length > 0
+      ? d.outputs.map(kind => ({ kind, title: RELIC_LABELS[kind] ?? kind }))
+      : null)
     setKeywords(d.keywords.slice(0, MAX_SPECIALTIES))
     setDraft('')
     if (d.location) setLocation(d.location)
@@ -1253,7 +1356,39 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     if (traitIds.length > 0) setPersonalityOpen(true)
     onAgentNameChange(d.agentName)
     setDossierOpen(false)
+    setPoolOpen(false)
+    setSetupStep('focus')
     inputRef.current?.focus()
+  }
+
+  // Opens the agent already built from this profile, as resuming a job does
+  // but with a fresh conversation: no brief, no bootstrap.
+  function launchDraft(d: AgentDraft) {
+    if (bootstrapping || !d.builtConfig) return
+    setPoolOpen(false)
+    onResumeChat({
+      id: crypto.randomUUID(),
+      agentName: d.agentName,
+      agentConfig: d.builtConfig,
+      messages: [],
+      savedAt: Date.now(),
+    })
+  }
+
+  // Keeps every freshly built agent in the pool, on the profile it was
+  // loaded from or as a new one, so reloading it later skips the build.
+  // Best effort: a failed save only means the next Deploy builds again.
+  function rememberBuild(built: AgentConfig) {
+    const traits = (PERSONALITY_TRAITS[agentType] ?? PERSONALITY_TRAITS.research)
+      .filter(t => selectedTraits.includes(t.id)).map(t => t.label)
+    const extras = { factorLocation, outputs: chosenDeliverables.map(d => d.kind), builtConfig: built }
+    const create = () => createAgentDraft(agentName, agentType, [...keywords], location.trim(), traits, [...activeToggles], extras)
+    const save = editing?.kind === 'draft'
+      ? updateAgentDraft(editing.id, agentName, agentType, [...keywords], location.trim(), traits, [...activeToggles], extras).catch(create)
+      : create()
+    save
+      .then(entry => setDrafts(prev => [entry, ...prev.filter(d => d.id !== entry.id)]))
+      .catch(() => {})
   }
 
   function deleteDraft(id: string) {
@@ -1298,6 +1433,9 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     setKeywords((cfg.keywords ?? []).slice(0, MAX_SPECIALTIES))
     setDraft('')
     if (cfg.location) setLocation(cfg.location)
+    setRestoredOutputs(cfg.deliverables && cfg.deliverables.length > 0
+      ? cfg.deliverables.map(({ kind, title }) => ({ kind, title }))
+      : null)
     const toggles = [...(cfg.active_toggles ?? [])]
     const traits = [...(cfg.active_traits ?? [])]
     setActiveToggles(toggles)
@@ -1318,6 +1456,8 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     setEditing({ kind: 'chat', id: chat.id })
     applyAgentConfigToForm(chat.agentConfig, chat.agentName)
     setDossierOpen(false)
+    setPoolOpen(false)
+    setSetupStep('focus')
     inputRef.current?.focus()
   }
 
@@ -1397,6 +1537,17 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
       setCommissionHint('Add at least one focus area above — the brief needs it before this agent can be commissioned.')
       return
     }
+    if (reusableConfig) {
+      onStart()
+      onDone({
+        ...reusableConfig,
+        provider,
+        ollama_model: provider === 'ollama' || provider === 'cloudflare' ? activeModel : null,
+        max_delegations: maxDelegations,
+        search_defaults: searchDefaults,
+      })
+      return
+    }
     const loc = usedLocation
     const activeInstructions = BEHAVIOR_TOGGLES.filter(t => activeToggles.includes(t.id)).map(t => t.instruction)
     const traitPool = PERSONALITY_TRAITS[agentType] ?? PERSONALITY_TRAITS.research
@@ -1430,7 +1581,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
         purposeImage,
         DEFAULT_AGENT_SPEC,
       )
-      onDone({
+      const built: AgentConfig = {
         ...config,
         keywords,
         location: loc,
@@ -1447,7 +1598,9 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
         // this session (no longer pruned on type change), which must not leak
         // into a persisted/resumable AgentConfig.
         active_traits: traitPool.filter(t => selectedTraits.includes(t.id)).map(t => t.id),
-      })
+      }
+      rememberBuild(built)
+      onDone(built)
     } catch (err) {
       const message = err instanceof Error && err.name === 'AbortError' ? 'Cancelled' : err instanceof Error ? err.message : 'Unknown error'
       setDeployRun(run => (run ? { ...run, error: run.error ?? message } : run))
@@ -1520,7 +1673,33 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
           <div className={styles.agentCardFieldsContent}>
           <div className={styles.agentCardMain}>
             <div className={styles.agentCardInfo}>
-              <h1 className={styles.title}>Agent {agentName}</h1>
+              <div className={styles.titleRow}>
+                <h1 className={styles.title}>Agent {agentName}</h1>
+                <button
+                  type="button"
+                  className={poolOpen ? styles.loadPreviousBtnOpen : styles.loadPreviousBtn}
+                  onClick={ev => { ev.stopPropagation(); setPoolOpen(o => !o) }}
+                  disabled={bootstrapping}
+                  aria-expanded={poolOpen}
+                  aria-controls="agent-pool-panel"
+                  title="Load a saved profile or job instead of starting from scratch"
+                >
+                  <AgentPoolIcon />
+                  <span>Or load a previous agent</span>
+                  <span className={styles.loadPreviousCount}>{drafts.length + visibleChats.length}</span>
+                  <span aria-hidden="true">{poolOpen ? '▴' : '▾'}</span>
+                </button>
+              </div>
+              {loadedEntryName && (
+                <p className={styles.loadedLine} role="status">
+                  Loaded from {editing?.kind === 'draft' ? 'profile' : 'job'} <strong>Agent {loadedEntryName}</strong>
+                  {reusableConfig
+                    ? ': already built from these steps, so Launch opens it straight away. Change a step and it is built again.'
+                    : editing?.kind === 'draft' ? ': Save updates it, Deploy builds it.' : ': Save updates that job, Deploy builds a new agent.'}
+                  {' '}
+                  <button type="button" className={styles.loadedLineBtn} onClick={resetSearch} disabled={bootstrapping}>Start fresh</button>
+                </p>
+              )}
               <button
                 type="button"
                 className={styles.modelLiner}
@@ -1913,8 +2092,10 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                 Saved Focus ({savedKeywordPool.length})
               </span>
               {focusRelated.length > 0 && (
+                <h4 className={styles.focusSubheading}>Related to your focus</h4>
+              )}
+              {focusRelated.length > 0 && (
                 <div className={styles.focusRelatedRow}>
-                  <span className={styles.focusRelatedLabel}>Related to your focus:</span>
                   {focusRelated.map(r => {
                     const atCap = keywords.length >= MAX_SPECIALTIES
                     return (
@@ -1932,8 +2113,14 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                   })}
                 </div>
               )}
+              {focusRelated.length > 0 && savedKeywordPool.length > 0 && (
+                <h4 className={styles.focusSubheading}>Other</h4>
+              )}
               {savedKeywordPool.length === 0 ? (
-                <p className={styles.savedEmpty}>No focus items saved yet. Save the ones above to reuse them on other agents.</p>
+                <p className={styles.briefPlaceholderText}>
+                  <span className={styles.briefPlaceholderIcon} aria-hidden="true">✎</span>
+                  No focus items saved yet. Save the ones above to reuse them on other agents.
+                </p>
               ) : (
                 <div className={styles.savedKeywordPool}>
                   {savedKeywordPool.map(kw => {
@@ -2049,7 +2236,10 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                     </div>
                   ) : briefTextEl}
                   {!aiBrief && briefError && !briefLoading && (
-                    <p className={styles.briefLoadingHint}>Showing the basic brief: the AI brief couldn't be drafted ({briefError}).</p>
+                    <p className={`${styles.focusWarnBox} ${styles.briefFallbackNote}`} role="status">
+                      <span className={styles.focusWarnIcon} aria-hidden="true">⚠</span>{' '}
+                      Showing the basic brief: the AI brief couldn't be drafted ({briefError}).
+                    </p>
                   )}
                   {briefLoading && (
                     <div className={styles.briefUpdating} role="status">
@@ -2183,6 +2373,22 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                       <SaveIcon />
                     </button>
                   )
+                case 'pool':
+                  return (
+                    <button
+                      key={id}
+                      {...toolbarDrag.dragProps(id)}
+                      type="button"
+                      className={`${styles.toolbarIconBtn} ${styles.toolbarControlBtn}`}
+                      onClick={ev => { ev.stopPropagation(); setPoolOpen(o => !o) }}
+                      disabled={bootstrapping}
+                      aria-expanded={poolOpen}
+                      title="Agent pool: reload a saved agent"
+                      aria-label="Agent pool"
+                    >
+                      <AgentPoolIcon />
+                    </button>
+                  )
                 case 'open':
                   return (
                     <button
@@ -2279,9 +2485,11 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
               className={`${styles.profileCommissionBtn} ${styles.toolbarDeploy} ${keywords.length === 0 ? styles.profileCommissionBtnBlocked : ''}`}
               disabled={bootstrapping}
               aria-disabled={keywords.length === 0}
-              title="Deploy: build the agent from these steps and start the job"
+              title={reusableConfig
+                ? 'Launch: this agent is already built from these steps, so it opens straight away'
+                : 'Deploy: build the agent from these steps and start the job'}
             >
-              {bootstrapping ? 'Configuring…' : 'Deploy >'}
+              {bootstrapping ? 'Configuring…' : reusableConfig ? 'Launch >' : 'Deploy >'}
             </button>
             {bootstrapping && (
               <button
@@ -2718,6 +2926,39 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
         onClose={() => setThemePickerOpen(false)}
       />
 
+      {/* Load a previous agent: a popup from the button by the name. */}
+      {poolOpen && (
+        <div className={styles.agentPoolOverlay} onClick={() => setPoolOpen(false)}>
+          <div
+            id="agent-pool-panel"
+            className={styles.agentPoolPanel}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="agent-pool-title"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className={styles.agentPoolPanelHead}>
+              <h2 id="agent-pool-title" className={styles.agentPoolPanelTitle}>Load a previous agent</h2>
+              <button type="button" className={styles.agentPoolPanelClose} onClick={() => setPoolOpen(false)} aria-label="Close" autoFocus>×</button>
+            </div>
+            <div className={styles.agentPoolPanelBody}>
+              <AgentPool
+                drafts={drafts}
+                chats={visibleChats}
+                formatDate={ts => formatSavedAt(ts, dateFormat)}
+                editing={editing}
+                disabled={bootstrapping}
+                onLoadDraft={loadDraft}
+                onLaunchDraft={launchDraft}
+                onDeleteDraft={deleteDraft}
+                onLoadChatDetails={loadChatDetails}
+                onResumeChat={resumeChat}
+                onHideChat={hideChat}
+              />
+            </div>
+          </div>
+        </div>
+      )}
       <AgentStableModal
         isOpen={stableModalOpen}
         onClose={() => setStableModalOpen(false)}
