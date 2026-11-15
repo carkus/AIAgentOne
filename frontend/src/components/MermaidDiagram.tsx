@@ -311,14 +311,15 @@ export default function MermaidDiagram({ chart, label, caption }: Props) {
     </div>
   ) : (
     <>
-      {/* Square, zoomable holder (GraphFrame) — drag to pan, +/−/fit to
-          zoom, ⛶ for the full-screen viewer. The svg is drawn at its own
+      {/* Square holder (GraphFrame) — drag to pan, ⛶ for the full-screen
+          viewer (no +/−/fit buttons). The svg is drawn at its own
           natural size (withExplicitSvgSize) and the frame scales it. */}
       <GraphFrame
         className={styles.mermaidDiagram}
         contentClassName={styles.mermaidContent}
         label="Diagram"
         onExpand={() => setViewerOpen(true)}
+        zoomButtons={false}
       >
         <div dangerouslySetInnerHTML={{ __html: svg ?? '' }} />
       </GraphFrame>

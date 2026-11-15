@@ -514,6 +514,7 @@ function GraphViewInner({ timeline, live = false, evalResults = [], trace = [] }
     <GraphFrame
       className={styles.container}
       label="Reasoning trace graph"
+      controls={false}
       height={height}
       scrollX
       contentWidth={contentWidth}
