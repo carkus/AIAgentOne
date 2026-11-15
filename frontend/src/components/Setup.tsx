@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { bootstrap, buildBriefRelic, createAgentDraft, createSavedSearch, deleteAgentDraft, deleteSavedSearch, fetchAgentBrief, fetchBriefMap, fetchBriefOutputs, fetchFocusInsights, fetchModelInfo, listAgentDrafts, listPublishedAgents, listSavedSearches, unpublishAgent, updateAgentDraft } from '../api'
 import type { AgentBrief, AgentDraft, BriefMap, FocusInsights, PublishedAgent, SavedSearch } from '../api'
 import { getLastOpenedPointer, hideSavedChat, loadHiddenChatIds, loadSavedChats, saveChat, setLastOpenedPointer } from '../chatStorage'
@@ -124,15 +124,12 @@ function ToolsIcon() {
 // Toolbar icon per output kind (the Brief's offered relics).
 // The Setup toolbar's buttons (toolbarLayout.ts): the default order is the
 // order listed here; dragging a button on the toolbar reorders its group.
-// Save Agent is locked on (it must always be visible). The outputs are a
+// The agent controls (Save, pool, Open agent, Advanced) aren't here: they
+// sit in their own panel under the agent's name. The outputs are a
 // fixed set (hide/reorder them in the toolbar builder); the Brief's picks
 // only mark one or two of them as suggested. No chart: the Brief comes
 // before any research, so there are no numbers to chart.
 const SETUP_TOOLBAR_ITEMS: ToolbarItem[] = [
-  { id: 'save', label: 'Save agent', group: 'controls', locked: true },
-  { id: 'pool', label: 'Agent pool', group: 'controls' },
-  { id: 'open', label: 'Open agent', group: 'controls' },
-  { id: 'advanced', label: 'Advanced setup', group: 'controls' },
   ...(['pdf', 'docx', 'markdown', 'slides', 'diagram', 'json'] as RelicKind[])
     .map(kind => ({ id: kind, label: RELIC_LABELS[kind], group: 'outputs' })),
 ]
@@ -523,12 +520,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
   // removed Focus survives in the original and comes back on reload).
   // Cleared by CLEAR / the logo / a generated character: a fresh agent.
   const [editing, setEditing] = useState<{ kind: 'draft' | 'chat'; id: string } | null>(null)
-  const hasAdvanced = onOpenAdvanced !== undefined
-  const toolbarItems = useMemo(
-    () => SETUP_TOOLBAR_ITEMS.filter(i => i.id !== 'advanced' || hasAdvanced),
-    [hasAdvanced],
-  )
-  const toolbarLayout = useToolbarLayout('setup', toolbarItems)
+  const toolbarLayout = useToolbarLayout('setup', SETUP_TOOLBAR_ITEMS)
   const toolbarDrag = useToolbarDrag(toolbarLayout)
   useEffect(() => {
     listAgentDrafts().then(setDrafts)
@@ -546,13 +538,6 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
   // a "Job search agent" list of keywords isn't a useful preset when you're
   // building a "Research agent". Pre-existing saves have no agentType and
   // are treated as 'research'.
-  // The saved profile or job the form was loaded from, for the line under
-  // the agent name.
-  const loadedEntryName = editing?.kind === 'draft'
-    ? drafts.find(d => d.id === editing.id)?.agentName
-    : editing?.kind === 'chat'
-      ? savedChats.find(c => c.id === editing.id)?.agentName
-      : undefined
   const visibleDrafts = drafts.filter(d => (d.agentType ?? 'research') === agentType)
   // Flattened, deduped, alphabetical pool of every keyword across every
   // saved search, shared by all three agent types — each one is its own
@@ -580,6 +565,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
   // cancelled run, so the graph on the steps shows where it stopped.
   const [deployRun, setDeployRun] = useState<DeployRun | null>(null)
   const [processGraphOpen, setProcessGraphOpen] = useState(true)
+  const [savedFocusOpen, setSavedFocusOpen] = useState(true)
   // Ticks once a second for the deploying overlay's "Ns elapsed" line — same
   // reset-on-stop/interval-while-active shape as Chat.tsx's own `elapsed`
   // (its `thinking` there is `bootstrapping` here).
@@ -621,8 +607,8 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
   function toggleBehavior(id: string) {
     setActiveToggles(prev => prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id])
   }
-  const [personalityOpen, setPersonalityOpen] = useState(true)
   const [typeOpen, setTypeOpen] = useState(true)
+  const [personalityOpen, setPersonalityOpen] = useState(true)
   const [selectedTraits, setSelectedTraits] = useState<string[]>([])
   function toggleTrait(id: string) {
     setSelectedTraits(prev => prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id])
@@ -1672,34 +1658,10 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
           <div className={styles.agentCardFields}>
           <div className={styles.agentCardFieldsContent}>
           <div className={styles.agentCardMain}>
-            <div className={styles.agentCardInfo}>
-              <div className={styles.titleRow}>
-                <h1 className={styles.title}>Agent {agentName}</h1>
-                <button
-                  type="button"
-                  className={poolOpen ? styles.loadPreviousBtnOpen : styles.loadPreviousBtn}
-                  onClick={ev => { ev.stopPropagation(); setPoolOpen(o => !o) }}
-                  disabled={bootstrapping}
-                  aria-expanded={poolOpen}
-                  aria-controls="agent-pool-panel"
-                  title="Load a saved profile or job instead of starting from scratch"
-                >
-                  <AgentPoolIcon />
-                  <span>Or load a previous agent</span>
-                  <span className={styles.loadPreviousCount}>{drafts.length + visibleChats.length}</span>
-                  <span aria-hidden="true">{poolOpen ? '▴' : '▾'}</span>
-                </button>
-              </div>
-              {loadedEntryName && (
-                <p className={styles.loadedLine} role="status">
-                  Loaded from {editing?.kind === 'draft' ? 'profile' : 'job'} <strong>Agent {loadedEntryName}</strong>
-                  {reusableConfig
-                    ? ': already built from these steps, so Launch opens it straight away. Change a step and it is built again.'
-                    : editing?.kind === 'draft' ? ': Save updates it, Deploy builds it.' : ': Save updates that job, Deploy builds a new agent.'}
-                  {' '}
-                  <button type="button" className={styles.loadedLineBtn} onClick={resetSearch} disabled={bootstrapping}>Start fresh</button>
-                </p>
-              )}
+            {/* The agent's header (agentCardMain): the name on the left,
+                the model under it. */}
+            <div className={styles.agentNameBlock}>
+              <h1 className={styles.title}>Agent {agentName}</h1>
               <button
                 type="button"
                 className={styles.modelLiner}
@@ -1710,8 +1672,59 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                 <span>{describeModel(provider, activeModel)}</span>
               </button>
             </div>
-            {/* Location as a small monochrome map card, right of the name,
-                with the "factor in" switch inside it. */}
+            {/* The right of the header, in its own panel: Select agent (the
+                pool of previous agents), Save, Open agent, Advanced, then
+                the location. Save is always shown (never hide it). */}
+            <div className={styles.agentBar}>
+              <div className={styles.agentControls} role="group" aria-label="Agent controls">
+                <button
+                  type="button"
+                  className={`${styles.agentSelectBtn} ${poolOpen ? styles.agentControlOpen : ''}`}
+                  onClick={ev => { ev.stopPropagation(); setPoolOpen(o => !o) }}
+                  disabled={bootstrapping}
+                  aria-expanded={poolOpen}
+                  aria-controls="agent-pool-panel"
+                  title={`Load a previous agent: ${drafts.length + visibleChats.length} saved`}
+                  aria-label={`Load a previous agent (${drafts.length + visibleChats.length} saved)`}
+                >
+                  <AgentPoolIcon />
+                  <span>Select agent</span>
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.toolbarIconBtn} ${styles.toolbarControlBtn}`}
+                  onClick={saveAgentDraft}
+                  disabled={bootstrapping}
+                  title="Save Agent profile — name, type, location and focus areas"
+                  aria-label="Save agent"
+                >
+                  <SaveIcon />
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.toolbarIconBtn} ${styles.toolbarControlBtn}`}
+                  onClick={ev => { ev.stopPropagation(); setCharacterGenOpen(true) }}
+                  disabled={bootstrapping}
+                  title="Open Agent: generate a character"
+                  aria-label="Open agent"
+                >
+                  <OpenAgentIcon />
+                </button>
+                {onOpenAdvanced && (
+                  <button
+                    type="button"
+                    className={`${styles.toolbarIconBtn} ${styles.toolbarControlBtn}`}
+                    onClick={ev => { ev.stopPropagation(); onOpenAdvanced() }}
+                    disabled={bootstrapping}
+                    title="Advanced: define the agent with a structured spec, hard tool limits and a review step"
+                    aria-label="Advanced setup"
+                  >
+                    <AdvancedIcon />
+                  </button>
+                )}
+              </div>
+            {/* Location as a small monochrome map card, with a small
+                "factor in location" tickbox at its right. */}
             <div className={`${styles.locationMap} ${!factorLocation ? styles.locationMapOff : ''}`}>
               <button
                 type="button"
@@ -1727,20 +1740,19 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                 </svg>
                 <span className={styles.locationMapName}>{location || 'No location set'}</span>
               </button>
-              <label
+              {/* Factor in location: a small tickbox at the card's right. */}
+              <input
+                type="checkbox"
                 className={styles.locationMapToggle}
+                checked={factorLocation}
+                onChange={ev => setFactorLocation(ev.target.checked)}
+                disabled={bootstrapping}
+                aria-label="Factor in location"
                 title={factorLocation
-                  ? 'The location is passed to the agent, which applies it only to location-dependent topics'
-                  : 'The location is not passed to the agent at all'}
-              >
-                <input
-                  type="checkbox"
-                  checked={factorLocation}
-                  onChange={ev => setFactorLocation(ev.target.checked)}
-                  disabled={bootstrapping}
-                />
-                <span>Factor in location</span>
-              </label>
+                  ? 'Factor in location: on. The location is passed to the agent, which applies it only to location-dependent topics.'
+                  : 'Factor in location: off. The location is not passed to the agent at all.'}
+              />
+            </div>
             </div>
           </div>
 
@@ -2087,10 +2099,14 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                 picked here without leaving the step. Renaming, deleting and
                 adding to the pool stay in the Dossier. */}
             <div className={styles.focusPoolRow}>
-              <span className={styles.fieldLabel}>
-                <span className={styles.sectionBulb} aria-hidden="true" />
-                Saved Focus ({savedKeywordPool.length})
-              </span>
+              <SectionHeader
+                label="Saved Focus"
+                count={savedKeywordPool.length}
+                expanded={savedFocusOpen}
+                onToggle={() => setSavedFocusOpen(o => !o)}
+                help="Focus items you've saved for reuse across agents. Tap one to add it to this agent's focus, or tap it again to take it off. Renaming and adding to the pool are in the Agent Dossier."
+              />
+              {savedFocusOpen && (<>
               {focusRelated.length > 0 && (
                 <h4 className={styles.focusSubheading}>Related to your focus</h4>
               )}
@@ -2158,6 +2174,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                   })}
                 </div>
               )}
+              </>)}
             </div>
 
           </div>
@@ -2356,76 +2373,8 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
             <p className={styles.commissionHint} role="status">{commissionHint}</p>
           )}
           <div className={styles.resetToolbar}>
-            {toolbarLayout.visible('controls').map(id => {
-              switch (id) {
-                case 'save':
-                  return (
-                    <button
-                      key={id}
-                      {...toolbarDrag.dragProps(id)}
-                      type="button"
-                      className={`${styles.toolbarIconBtn} ${styles.toolbarControlBtn}`}
-                      onClick={saveAgentDraft}
-                      disabled={bootstrapping}
-                      title="Save Agent profile — name, type, location and focus areas"
-                      aria-label="Save agent"
-                    >
-                      <SaveIcon />
-                    </button>
-                  )
-                case 'pool':
-                  return (
-                    <button
-                      key={id}
-                      {...toolbarDrag.dragProps(id)}
-                      type="button"
-                      className={`${styles.toolbarIconBtn} ${styles.toolbarControlBtn}`}
-                      onClick={ev => { ev.stopPropagation(); setPoolOpen(o => !o) }}
-                      disabled={bootstrapping}
-                      aria-expanded={poolOpen}
-                      title="Agent pool: reload a saved agent"
-                      aria-label="Agent pool"
-                    >
-                      <AgentPoolIcon />
-                    </button>
-                  )
-                case 'open':
-                  return (
-                    <button
-                      key={id}
-                      {...toolbarDrag.dragProps(id)}
-                      type="button"
-                      className={`${styles.toolbarIconBtn} ${styles.toolbarControlBtn}`}
-                      onClick={ev => { ev.stopPropagation(); setCharacterGenOpen(true) }}
-                      disabled={bootstrapping}
-                      title="Open Agent: generate a character"
-                      aria-label="Open agent"
-                    >
-                      <OpenAgentIcon />
-                    </button>
-                  )
-                case 'advanced':
-                  return onOpenAdvanced && (
-                    <button
-                      key={id}
-                      {...toolbarDrag.dragProps(id)}
-                      type="button"
-                      className={`${styles.toolbarIconBtn} ${styles.toolbarControlBtn}`}
-                      onClick={ev => { ev.stopPropagation(); onOpenAdvanced() }}
-                      disabled={bootstrapping}
-                      title="Advanced: define the agent with a structured spec, hard tool limits and a review step"
-                      aria-label="Advanced setup"
-                    >
-                      <AdvancedIcon />
-                    </button>
-                  )
-                default:
-                  return null
-              }
-            })}
             {briefOutputs.length > 0 && (
-              // Output buttons: a different job from the agent controls
-              // beside them, so grouped on their own background.
+              // Output buttons, grouped on their own background.
               <div className={styles.toolbarOutputs} role="group" aria-label="Outputs">
                 {briefOutputs.map(s => {
                   const built = briefRelics.some(r => r.kind === s.kind)
@@ -2952,7 +2901,6 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                 onLaunchDraft={launchDraft}
                 onDeleteDraft={deleteDraft}
                 onLoadChatDetails={loadChatDetails}
-                onResumeChat={resumeChat}
                 onHideChat={hideChat}
               />
             </div>

@@ -293,3 +293,29 @@
   opacity: 0.5;
   cursor: default;
 }
+
+/* A job's workers: name and the task each was given. */
+.workers {
+  font-size: var(--font-size-sm);
+  color: var(--color-muted);
+}
+
+.workersToggle {
+  cursor: pointer;
+  color: var(--color-accent);
+  width: fit-content;
+}
+
+.workersList {
+  margin: 0.3rem 0 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  line-height: 1.4;
+}
+
+.workersList strong {
+  color: var(--color-text);
+  font-weight: 600;
+}
