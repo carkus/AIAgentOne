@@ -6,6 +6,8 @@
 // Two modes:
 // - Own zoom (default): the children are drawn at their natural size and the
 //   frame scales/pans them itself (buttons, drag to pan, Ctrl+wheel to zoom).
+//   Drag only pans an axis the scaled content overflows, and not past its
+//   edges, so a diagram that fits the frame stays put.
 //   Fits the content to the width and collapses the frame height to it
 //   (85vh at most) until the user zooms or pans.
 // - External zoom (`zoom` prop): for content that already owns a viewport
@@ -130,8 +132,27 @@ export default function GraphFrame({ children, zoom, onExpand, className, conten
     return () => frame.removeEventListener('wheel', onWheel)
   }, [external, zoomBy])
 
+  // Room to pan on each axis: the scaled content against the frame's
+  // visible area (left of the zoom controls). null = it fits, no panning.
+  const panRange = (scale: number) => {
+    const frame = frameRef.current
+    const content = contentRef.current
+    if (!frame || !content) return { x: null, y: null }
+    const controls = controlsRef.current
+    const aw = controls ? Math.max(0, controls.offsetLeft - CONTROLS_GAP) : frame.clientWidth
+    const fh = frame.clientHeight
+    const cw = content.offsetWidth * scale
+    const ch = content.offsetHeight * scale
+    return {
+      x: cw + 2 * FIT_PAD > aw + 1 ? { lo: aw - cw - FIT_PAD, hi: FIT_PAD } : null,
+      y: ch + 2 * FIT_PAD > fh + 1 ? { lo: fh - ch - FIT_PAD, hi: FIT_PAD } : null,
+    }
+  }
+  const range = external ? { x: null, y: null } : panRange(view.scale)
+  const fits = !range.x && !range.y
+
   const onPointerDown = (e: React.PointerEvent) => {
-    if (external || e.button !== 0) return
+    if (external || e.button !== 0 || fits) return
     if ((e.target as HTMLElement).closest(`.${styles.controls}`)) return
     drag.current = { id: e.pointerId, startX: e.clientX, startY: e.clientY, x: view.x, y: view.y }
     e.currentTarget.setPointerCapture(e.pointerId)
@@ -140,7 +161,14 @@ export default function GraphFrame({ children, zoom, onExpand, className, conten
     const d = drag.current
     if (!d || d.id !== e.pointerId) return
     userMoved.current = true
-    setView(v => ({ ...v, x: d.x + e.clientX - d.startX, y: d.y + e.clientY - d.startY }))
+    // Clamp to the content's edges; the start position is always allowed,
+    // so a view left out of range by a zoom doesn't jump on the next drag.
+    const axis = (r: { lo: number; hi: number } | null, start: number, delta: number) =>
+      r ? Math.min(Math.max(r.hi, start), Math.max(Math.min(r.lo, start), start + delta)) : start
+    setView(v => {
+      const r = panRange(v.scale)
+      return { ...v, x: axis(r.x, d.x, e.clientX - d.startX), y: axis(r.y, d.y, e.clientY - d.startY) }
+    })
   }
   const onPointerUp = (e: React.PointerEvent) => {
     if (drag.current?.id === e.pointerId) drag.current = null
@@ -161,6 +189,7 @@ export default function GraphFrame({ children, zoom, onExpand, className, conten
             ? { height: externalHeight + (scrollX ? SCROLLBAR_ALLOWANCE : 0), aspectRatio: 'auto' }
             : undefined
       }
+      data-fits={!external && fits ? '' : undefined}
       role="group"
       aria-label={label}
       onPointerDown={onPointerDown}

@@ -1151,6 +1151,45 @@
   animation: briefSpin 0.8s linear infinite;
 }
 
+/* The streamed brief's stages (Setup.tsx's briefStagesEl): over the old
+   brief until the first paragraph lands, then in a row above the draft. */
+.briefStages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--graph-50);
+  font-size: 0.9em;
+  font-weight: 500;
+}
+
+.briefStage {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.briefStage[data-state='pending'] { opacity: 0.55; }
+.briefStage[data-state='done'] { color: #1f6f73; }
+.briefStage[data-state='failed'] { color: #b91c1c; }
+
+.briefStageMark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+}
+
+.briefStageMark .briefUpdatingSpinner {
+  width: 12px;
+  height: 12px;
+}
+
+.briefQuestionBox .briefStages { margin-top: 0.5rem; }
+
 @keyframes briefSpin {
   to { transform: rotate(360deg); }
 }

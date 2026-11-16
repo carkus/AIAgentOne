@@ -185,6 +185,96 @@ export async function fetchAgentBrief(
   return res.json();
 }
 
+export type BriefStageId = 'read' | 'focus' | 'character' | 'plan';
+export type BriefPartId = 'focus' | 'character' | 'plan';
+
+export type BriefStreamEvent =
+  | { type: 'stage'; stage: BriefStageId; state: 'active' | 'done' | 'failed'; ms?: number }
+  | { type: 'part'; part: BriefPartId; text: string }
+  | { type: 'fallback'; message: string }
+  | { type: 'done'; brief: AgentBrief; map: BriefMap | null }
+  | { type: 'error'; message: string };
+
+/**
+ * The brief in stages (POST /brief-stream, brief.py's generate_brief_stream):
+ * a read of the case and paragraphs 1-2 at once, then paragraph 3 with the
+ * graph. `onEvent` gets each stage and paragraph as it lands. Resolves with
+ * the finished brief and its graph (null when the graph failed); throws on
+ * failure, like fetchAgentBrief.
+ */
+export async function streamAgentBrief(
+  agentType: AgentTemplateId | undefined,
+  keywords: string[],
+  location: string,
+  agentName: string,
+  provider: LlmProvider | undefined,
+  ollamaModel: string | null | undefined,
+  priorQuestion: string | null | undefined,
+  priorAnswer: string | null | undefined,
+  maxDelegations: number | null | undefined,
+  behaviors: string[] | undefined,
+  traits: string[] | undefined,
+  onEvent: (event: BriefStreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<{ brief: AgentBrief; map: BriefMap | null }> {
+  const res = await fetch(`${API_URL}/brief-stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      agentType,
+      keywords,
+      location,
+      agentName,
+      provider: provider ?? undefined,
+      ollama_model: ollamaModel ?? undefined,
+      priorQuestion: priorQuestion ?? undefined,
+      priorAnswer: priorAnswer ?? undefined,
+      maxDelegations: maxDelegations ?? undefined,
+      behaviors: behaviors && behaviors.length > 0 ? behaviors : undefined,
+      traits: traits && traits.length > 0 ? traits : undefined,
+    }),
+    signal,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error ?? 'Failed to generate brief');
+  }
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('No response body');
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let result: { brief: AgentBrief; map: BriefMap | null } | null = null;
+  let errorMessage: string | null = null;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        let event: BriefStreamEvent;
+        try {
+          event = JSON.parse(trimmed) as BriefStreamEvent;
+        } catch {
+          continue;
+        }
+        onEvent(event);
+        if (event.type === 'done') result = { brief: event.brief, map: event.map };
+        else if (event.type === 'error') errorMessage = event.message;
+      }
+    }
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+  if (errorMessage) throw new Error(errorMessage);
+  if (!result) throw new Error('Brief stream ended without a result');
+  return result;
+}
+
 /**
  * The brief drawn as a flow (POST /brief-map, brief.py's generate_brief_map),
  * shown as BriefGraph. A second call made after the brief text arrives, so

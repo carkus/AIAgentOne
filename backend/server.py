@@ -38,7 +38,7 @@ import tempfile
 from flask import Flask, Response, jsonify, request, stream_with_context
 from bootstrap import generate_agent_config_stream, validate_config
 from agent_stream import run_agent_stream
-from brief import generate_brief, generate_brief_map, propose_outputs
+from brief import generate_brief, generate_brief_map, generate_brief_stream, propose_outputs
 from focus_insights import check_focus
 from recap import generate_recap
 from relic import KINDS, generate_relic
@@ -168,6 +168,51 @@ def brief():
     if result is None:
         return jsonify({"error": "Could not generate a brief"}), 502
     return jsonify(result)
+
+
+@app.route("/brief-stream", methods=["POST", "OPTIONS"])
+def brief_stream():
+    """The brief in stages (brief.py's generate_brief_stream), streamed as
+    NDJSON so Setup can show each part as it lands. Same body as /brief."""
+    if request.method == "OPTIONS":
+        return "", 204
+    body = request.get_json() or {}
+    keywords = body.get("keywords") or []
+    if not isinstance(keywords, list) or not keywords:
+        return jsonify({"error": "keywords is required"}), 400
+    provider = ((body.get("provider") or "").strip() or None)
+    model = ((body.get("ollama_model") or "").strip() or None)
+    if provider != "ollama":
+        rate_limit_error = rate_limit.check(rate_limit.client_ip(request), bucket="brief")
+        if rate_limit_error:
+            return jsonify({"error": rate_limit_error}), 429
+    args = dict(
+        agent_type=body.get("agentType"),
+        keywords=keywords,
+        location=(body.get("location") or "").strip(),
+        agent_name=(body.get("agentName") or "").strip(),
+        provider=provider,
+        model=model,
+        prior_question=(body.get("priorQuestion") or "").strip() or None,
+        prior_answer=(body.get("priorAnswer") or "").strip() or None,
+        max_delegations=body.get("maxDelegations"),
+        behaviors=body.get("behaviors") or None,
+        traits=body.get("traits") or None,
+    )
+
+    def generate():
+        try:
+            for event in generate_brief_stream(**args):
+                yield json.dumps(event) + "\n"
+        except Exception as e:
+            app.logger.warning("brief stream failed: %s", e)
+            yield json.dumps({"type": "error", "message": "Could not generate a brief"}) + "\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="application/x-ndjson",
+        headers={"X-Accel-Buffering": "no"},
+    )
 
 
 @app.route("/brief-map", methods=["POST", "OPTIONS"])

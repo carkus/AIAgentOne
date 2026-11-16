@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { bootstrap, buildBriefRelic, createAgentDraft, createSavedSearch, deleteAgentDraft, deleteSavedSearch, fetchAgentBrief, fetchBriefMap, fetchBriefOutputs, fetchFocusInsights, fetchModelInfo, listAgentDrafts, listPublishedAgents, listSavedSearches, unpublishAgent, updateAgentDraft } from '../api'
-import type { AgentBrief, AgentDraft, BriefMap, FocusInsights, PublishedAgent, SavedSearch } from '../api'
+import { bootstrap, buildBriefRelic, createAgentDraft, createSavedSearch, deleteAgentDraft, deleteSavedSearch, fetchBriefOutputs, streamAgentBrief, fetchFocusInsights, fetchModelInfo, listAgentDrafts, listPublishedAgents, listSavedSearches, unpublishAgent, updateAgentDraft } from '../api'
+import type { AgentBrief, AgentDraft, BriefMap, BriefPartId, BriefStageId, BriefStreamEvent, FocusInsights, PublishedAgent, SavedSearch } from '../api'
 import { getLastOpenedPointer, hideSavedChat, loadHiddenChatIds, loadSavedChats, saveChat, setLastOpenedPointer } from '../chatStorage'
 import type { AgentConfig, AgentTemplateId, ArmStat, BootstrapStreamEvent, Deliverable, LlmProvider, Relic, RelicKind, RelicSuggestion, SavedChat, SavedChatMessage, SearchDefaults } from '../types'
 import { AGENT_TEMPLATES, getTemplate, PERSONALITY_TRAITS, describeTraitEffect, BEHAVIOR_TOGGLES, DEFAULT_AGENT_SPEC, MAX_FOCUS_CHARS, shortFocus, type BehaviorToggle } from '../agentTypes'
@@ -232,6 +232,28 @@ const SETUP_STEPS: { id: SetupStepId; label: string; help: string }[] = [
   { id: 'brief', label: 'Brief', help: "Step 3: a live preview of what this agent has agreed to do, generated from its type, focus and character. It's read-only: change those steps to change it." },
   { id: 'outputs', label: 'Outputs', help: "Step 4: what the agent hands back. It proposes the outputs it judges most useful for this job and ticks its own picks; change them freely. Chosen outputs are offered as ready-to-build files after each research turn." },
 ]
+
+// The streamed brief's stages (brief.py's generate_brief_stream), in the
+// order shown while it drafts. The first three run at the same time.
+type BriefStageState = 'pending' | 'active' | 'done' | 'failed'
+interface BriefProgress {
+  stages: Record<BriefStageId, BriefStageState>
+  parts: Partial<Record<BriefPartId, string>>
+  // The staged brief gave up and the one-call brief is being written.
+  fallback: boolean
+}
+const EMPTY_BRIEF_PROGRESS: BriefProgress = {
+  stages: { read: 'pending', focus: 'pending', character: 'pending', plan: 'pending' },
+  parts: {},
+  fallback: false,
+}
+const BRIEF_STAGES: { id: BriefStageId; label: string }[] = [
+  { id: 'read', label: 'Reading the case' },
+  { id: 'focus', label: 'The focuses' },
+  { id: 'character', label: 'Its character' },
+  { id: 'plan', label: 'The plan and graph' },
+]
+const BRIEF_PARTS: BriefPartId[] = ['focus', 'character', 'plan']
 
 // Step navigation for the setup card: a breadcrumb of the step names, each
 // one clickable. Steps aren't gated, so the user can jump straight to any
@@ -616,10 +638,13 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
   }
   const [aiBrief, setAiBrief] = useState<AgentBrief | null>(null)
   const [briefLoading, setBriefLoading] = useState(false)
-  // The brief's graph, drawn by a second call once the text is in (so the
-  // text never waits on it). Null while drawing or when drawing failed.
+  // The brief's graph, drawn in the brief's last stage alongside its third
+  // paragraph. Null while drawing or when drawing failed.
   const [briefMap, setBriefMap] = useState<BriefMap | null>(null)
   const [briefMapLoading, setBriefMapLoading] = useState(false)
+  // The streamed brief's stages and the paragraphs written so far, shown
+  // while it drafts (brief.py's generate_brief_stream). Null when idle.
+  const [briefProgress, setBriefProgress] = useState<BriefProgress | null>(null)
   // Why the AI brief failed (e.g. a 429), shown under the template fallback
   // so a quiet downgrade to the two-line brief is visible.
   const [briefError, setBriefError] = useState<string | null>(null)
@@ -793,20 +818,40 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
   // buildAgentBrief() template (aiBrief stays null) on any failure, so a
   // network hiccup never leaves the Brief section blank. A stale response
   // from a superseded request is dropped via briefRequestIdRef.
-  // Second stage: draw the graph from the brief text that just arrived.
-  // Shares briefRequestIdRef, so a newer brief request drops a stale map.
-  function drawBriefMap(brief: AgentBrief, requestId: number) {
+  // Streams the brief in stages (a read of the case and paragraphs 1-2 at
+  // once, then paragraph 3 with the graph), updating briefProgress as each
+  // lands. Events from a superseded request (briefRequestIdRef) are dropped.
+  function streamBrief(requestId: number, priorQuestion?: string, priorAnswer?: string) {
+    const behaviorLabels = BEHAVIOR_TOGGLES.filter(t => activeToggles.includes(t.id)).map(t => t.label)
+    const traitLabels = (PERSONALITY_TRAITS[agentType] ?? PERSONALITY_TRAITS.research)
+      .filter(t => selectedTraits.includes(t.id)).map(t => t.label)
     setBriefMap(null)
-    if (brief.type !== 'brief') {
-      setBriefMapLoading(false)
-      return
+    setBriefMapLoading(false)
+    setBriefProgress(EMPTY_BRIEF_PROGRESS)
+    const onEvent = (event: BriefStreamEvent) => {
+      if (requestId !== briefRequestIdRef.current) return
+      if (event.type === 'stage') {
+        setBriefProgress(p => p && { ...p, stages: { ...p.stages, [event.stage]: event.state } })
+        if (event.stage === 'plan') setBriefMapLoading(event.state === 'active')
+      } else if (event.type === 'part') {
+        setBriefProgress(p => p && { ...p, parts: { ...p.parts, [event.part]: event.text } })
+      } else if (event.type === 'fallback') {
+        // The one-call brief replaces the parts; drop them.
+        setBriefProgress(p => p && { ...p, parts: {}, fallback: true })
+      }
     }
-    setBriefMapLoading(true)
-    fetchBriefMap(brief.text, [...keywords], agentType, provider, activeModel)
-      .then(map => {
-        if (requestId !== briefRequestIdRef.current) return
+    return streamAgentBrief(agentType, [...keywords], usedLocation, agentName, provider, activeModel,
+      priorQuestion, priorAnswer, maxDelegations, behaviorLabels, traitLabels, onEvent)
+      .then(({ brief, map }) => {
+        if (requestId !== briefRequestIdRef.current) return null
+        setAiBrief(brief)
         setBriefMap(map)
+        return brief
+      })
+      .finally(() => {
+        if (requestId !== briefRequestIdRef.current) return
         setBriefMapLoading(false)
+        setBriefProgress(null)
       })
   }
 
@@ -823,6 +868,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
       setBriefMap(null)
       setBriefMapLoading(false)
       setBriefLoading(false)
+      setBriefProgress(null)
       return
     }
     window.clearTimeout(briefDebounceRef.current)
@@ -841,21 +887,15 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     setOutputsFailed(false)
     setOutputsLoading(false)
     setChosenOutputs([])
-    const behaviorLabels = BEHAVIOR_TOGGLES.filter(t => activeToggles.includes(t.id)).map(t => t.label)
-    const traitLabels = (PERSONALITY_TRAITS[agentType] ?? PERSONALITY_TRAITS.research)
-      .filter(t => selectedTraits.includes(t.id)).map(t => t.label)
     briefDebounceRef.current = window.setTimeout(() => {
       // Recorded when the request actually goes out, so a change undone
       // inside the debounce window doesn't count as built.
       lastBriefInputsRef.current = briefInputsKey
       setBriefScheduled(false)
       setBriefLoading(true)
-      fetchAgentBrief(agentType, [...keywords], usedLocation, agentName, provider, activeModel, undefined, undefined, maxDelegations, behaviorLabels, traitLabels)
+      streamBrief(requestId)
         .then(result => {
-          if (requestId !== briefRequestIdRef.current) return
-          setAiBrief(result)
-          setBriefError(null)
-          drawBriefMap(result, requestId)
+          if (result) setBriefError(null)
         })
         .catch(err => {
           if (requestId !== briefRequestIdRef.current) return
@@ -974,7 +1014,11 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     const briefNode: ProcessNodeData = keywords.length === 0
       ? { icon: '📝', title: 'Brief', state: 'pending', detail: 'Drafted once there is Focus' }
       : briefLoading
-        ? { icon: '📝', title: 'Brief', state: 'active', detail: 'Drafting the brief…' }
+        ? { icon: '📝', title: 'Brief', state: 'active', detail: briefProgress
+            ? briefProgress.fallback
+              ? 'Writing the brief in one go…'
+              : `Drafting the brief: ${BRIEF_STAGES.filter(s => briefProgress.stages[s.id] === 'done').length} of ${BRIEF_STAGES.length} parts done`
+            : 'Drafting the brief…' }
         : aiBrief?.type === 'question'
           ? { icon: '📝', title: 'Brief', state: 'active', detail: `Asking you: ${aiBrief.text}` }
           : aiBrief
@@ -1020,15 +1064,9 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     if (!answer || !aiBrief || aiBrief.type !== 'question' || answeringBrief) return
     setAnsweringBrief(true)
     const requestId = ++briefRequestIdRef.current
-    const behaviorLabels = BEHAVIOR_TOGGLES.filter(t => activeToggles.includes(t.id)).map(t => t.label)
-    const traitLabels = (PERSONALITY_TRAITS[agentType] ?? PERSONALITY_TRAITS.research)
-      .filter(t => selectedTraits.includes(t.id)).map(t => t.label)
-    fetchAgentBrief(agentType, [...keywords], usedLocation, agentName, provider, activeModel, aiBrief.text, answer, maxDelegations, behaviorLabels, traitLabels)
+    streamBrief(requestId, aiBrief.text, answer)
       .then(result => {
-        if (requestId !== briefRequestIdRef.current) return
-        setAiBrief(result)
-        setBriefAnswer('')
-        drawBriefMap(result, requestId)
+        if (result) setBriefAnswer('')
       })
       .catch(() => {
         // Leave the question showing — the user can retry the answer.
@@ -1636,9 +1674,36 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
 
   // The brief in prose. Under the brief graph it sits in its own collapsible
   // "Written brief for Agent" section; without a graph it shows as before.
+  // Paragraphs of a brief still drafting, in order, once any has landed;
+  // until then the previous brief (or the template) stays in view.
+  const draftParts = briefProgress ? BRIEF_PARTS.map(id => briefProgress.parts[id]).filter(Boolean) : []
+  const briefDraftText = draftParts.length > 0 ? draftParts.join('\n\n') : null
+
+  // Which stages of the streamed brief are done, shown while it drafts.
+  const briefStagesEl = briefProgress && (
+    <ol className={styles.briefStages} aria-label="Brief progress">
+      {briefProgress.fallback ? (
+        <li className={styles.briefStage} data-state="active">
+          <span className={styles.briefStageMark} aria-hidden="true"><span className={styles.briefUpdatingSpinner} /></span>
+          Writing the brief in one go
+        </li>
+      ) : BRIEF_STAGES.map(s => {
+        const state = briefProgress.stages[s.id]
+        return (
+          <li key={s.id} className={styles.briefStage} data-state={state}>
+            <span className={styles.briefStageMark} aria-hidden="true">
+              {state === 'active' ? <span className={styles.briefUpdatingSpinner} /> : state === 'done' ? '✓' : state === 'failed' ? '✕' : '·'}
+            </span>
+            {s.label}
+          </li>
+        )
+      })}
+    </ol>
+  )
+
   const briefTextEl = (
     <p className={styles.agentSummaryText}>
-      {aiBrief?.text ?? buildAgentBrief(
+      {briefDraftText ?? aiBrief?.text ?? buildAgentBrief(
         agentType,
         keywords,
         usedLocation,
@@ -2226,6 +2291,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                         {answeringBrief ? '…' : 'Continue'}
                       </button>
                     </div>
+                    {answeringBrief && briefStagesEl}
                   </div>
                   {briefWarning && (
                     <div className={styles.briefNoteBox} role="note">
@@ -2236,6 +2302,9 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
               ) : (
                 <>
                   <div className={styles.briefBody} aria-busy={briefLoading}>
+                  {/* Once paragraphs are landing, progress sits above them
+                      instead of covering them. */}
+                  {briefLoading && briefDraftText && briefStagesEl}
                   {(briefMap || briefMapLoading) && (
                     <div className={styles.writtenBrief}>
                       <SectionHeader
@@ -2245,7 +2314,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                         help="The brief drawn as a flow: what you asked for, how the agent understood it, the lines of work it will split into, and what it hands back."
                       />
                       {briefGraphOpen && briefMap && <BriefGraph map={briefMap} focuses={keywords} />}
-                      {briefGraphOpen && !briefMap && !briefLoading && (
+                      {briefGraphOpen && !briefMap && briefMapLoading && (
                         <p className={styles.briefMapDrawing} role="status">
                           <span className={styles.briefUpdatingSpinner} aria-hidden="true" />
                           <span>Drawing the brief graph…</span>
@@ -2281,10 +2350,14 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                       </button>
                     </p>
                   )}
-                  {briefLoading && (
+                  {briefLoading && !briefDraftText && (
                     <div className={styles.briefUpdating} role="status">
-                      <span className={styles.briefUpdatingSpinner} aria-hidden="true" />
-                      <span>Updating brief…</span>
+                      {briefStagesEl ?? (
+                        <>
+                          <span className={styles.briefUpdatingSpinner} aria-hidden="true" />
+                          <span>Updating brief…</span>
+                        </>
+                      )}
                     </div>
                   )}
                   </div>

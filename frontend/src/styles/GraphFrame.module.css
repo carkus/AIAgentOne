@@ -26,6 +26,11 @@
   cursor: grabbing;
 }
 
+/* Own-zoom content that fits the frame has nowhere to pan to. */
+.pannable[data-fits] {
+  cursor: default;
+}
+
 .content {
   position: absolute;
   top: 0;
@@ -48,7 +53,6 @@
   overflow-x: auto;
   overflow-y: hidden;
   touch-action: pan-x;
-  cursor: grab;
 }
 
 .scrollContent {
