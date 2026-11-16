@@ -2232,7 +2232,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                         onToggle={() => setBriefGraphOpen(o => !o)}
                         help="The brief drawn as a flow: what you asked for, how the agent understood it, the lines of work it will split into, and what it hands back."
                       />
-                      {briefGraphOpen && briefMap && <BriefGraph map={briefMap} />}
+                      {briefGraphOpen && briefMap && <BriefGraph map={briefMap} focuses={keywords} />}
                       {briefGraphOpen && !briefMap && !briefLoading && (
                         <p className={styles.briefMapDrawing} role="status">
                           <span className={styles.briefUpdatingSpinner} aria-hidden="true" />

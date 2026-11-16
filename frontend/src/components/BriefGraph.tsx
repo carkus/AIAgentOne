@@ -43,18 +43,31 @@ function BriefNode({ data }: { data: BriefNodeData }) {
   )
 }
 
-export default function BriefGraph({ map }: { map: BriefMap }) {
-  const columns = useMemo<ColumnNode<BriefNodeData>[][]>(() => [
-    [{ id: 'ask', data: { variant: 'ask', icon: '📨', title: 'The commission', detail: map.ask } }],
-    ...(map.understood.length > 0
-      ? [[{ id: 'understood', data: { variant: 'understood' as const, icon: '🧠', title: 'Understood as', items: map.understood } }]]
-      : []),
-    map.work.map((w, i) => ({
-      id: `work-${i}`,
-      data: { variant: 'work' as const, icon: '🕵️', title: w.label, detail: w.detail || undefined },
-    })),
-    [{ id: 'result', data: { variant: 'result', icon: '📁', title: 'Desired result', detail: map.result } }],
-  ], [map])
+// Every mention of a focus topic in the brief's text, uppercased, so the
+// topics stand out the same way they do on the process graph.
+function focusUpper(text: string, focuses: string[]): string {
+  const terms = focuses.map(f => f.trim()).filter(Boolean).sort((a, b) => b.length - a.length)
+  if (terms.length === 0 || !text) return text
+  const escaped = terms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  const re = new RegExp(`(?<![A-Za-z0-9])(${escaped.join('|')})(?![A-Za-z0-9])`, 'gi')
+  return text.replace(re, m => m.toUpperCase())
+}
+
+export default function BriefGraph({ map, focuses = [] }: { map: BriefMap; focuses?: string[] }) {
+  const columns = useMemo<ColumnNode<BriefNodeData>[][]>(() => {
+    const up = (t: string) => focusUpper(t, focuses)
+    return [
+      [{ id: 'ask', data: { variant: 'ask', icon: '📨', title: 'The commission', detail: up(map.ask) } }],
+      ...(map.understood.length > 0
+        ? [[{ id: 'understood', data: { variant: 'understood' as const, icon: '🧠', title: 'Understood as', items: map.understood.map(up) } }]]
+        : []),
+      map.work.map((w, i) => ({
+        id: `work-${i}`,
+        data: { variant: 'work' as const, icon: '🕵️', title: up(w.label), detail: w.detail ? up(w.detail) : undefined },
+      })),
+      [{ id: 'result', data: { variant: 'result', icon: '📁', title: 'Desired result', detail: up(map.result) } }],
+    ]
+  }, [map, focuses])
   // No zoom/fit/expand controls: the brief graph always fits its frame.
   return <ColumnGraph columns={columns} node={BriefNode} nodeWidth={NODE_WIDTH} label="Brief graph" zoomControls={false} />
 }
