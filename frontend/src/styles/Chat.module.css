@@ -1422,6 +1422,21 @@
   margin-top: 0.5rem;
 }
 
+/* Same label as the recap popup's "Where to next" (FeedbackReportModal .sectionLabel). */
+.nextOptionsLabel {
+  color: var(--color-accent-secondary);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: var(--font-size-xs);
+  font-weight: 400;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.nextOptionsLabel::before {
+  content: '◆ ';
+  color: var(--color-accent);
+}
+
 .nextOptionBtn {
   composes: btn-base from global;
   background: #ffffff;

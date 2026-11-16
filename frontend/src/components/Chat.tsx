@@ -19,13 +19,12 @@ import RelicPreviewModal from './RelicPreviewModal'
 import { downloadRelic, RELIC_KINDS, RELIC_LABELS, relicFilename } from '../relicFiles'
 import ImageViewer from './ImageViewer'
 import FeedbackStatusBar from './FeedbackStatusBar'
-import type { AgentConfig, EvalResultItem, Relic, RelicKind, RelicSuggestion, ResultFeedback, SavedChat, SavedChatMessage, StreamEvent, ToolCall, TraceSpan } from '../types'
+import type { AgentConfig, EvalResultItem, Relic, RelicKind, RelicSuggestion, ResultFeedback, SavedChat, SavedChatMessage, StreamEvent, TeamMember, ToolCall, TraceSpan } from '../types'
 import { describeModel, describeModelFallback, describeServedModel, formatModelInfo, lastServedModel, type ModelInfo } from '../modelLabel'
 import { normalizeInlineOrderedLists } from '../markdownFormat'
 import { formatDate, getDateFormat } from '../dateFormat'
 import { extractMermaidDiagrams } from '../mermaidExtract'
 import AgentBriefingModal from './AgentBriefingModal'
-import ResultRating from './ResultRating'
 import styles from '../styles/Chat.module.css'
 import ah from '../styles/AgentHeader.module.css'
 import splashLogo from '../assets/favicon.png'
@@ -322,6 +321,9 @@ interface Props {
 
 export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, initialMessages, chatId }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>(() => initialMessages ?? [])
+  // The job's workers: sent with every turn so the backend reuses them, and
+  // replaced by the team each `done` event returns. Saved with the chat.
+  const [team, setTeam] = useState<TeamMember[] | undefined>(agentConfig.team)
   // Toolbar model: the one that last actually answered (newest turn's trace,
   // then bootstrap's), not just the one the agent was configured with.
   const configuredModel = describeModel(agentConfig.provider, agentConfig.ollama_model)
@@ -522,7 +524,7 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
     return {
       id: chatIdRef.current,
       agentName,
-      agentConfig: { ...agentConfig, keywords: focusPool },
+      agentConfig: { ...agentConfig, keywords: focusPool, team },
       messages: messages.map(({ role, content, feedback, displayContent, image, toolCalls, planDiagram, planSummary, durationSeconds, usage, rateLimits, relicSuggestions, relics, trace, nextOptions }) => ({
         role, content, feedback, displayContent, image, toolCalls, planDiagram, planSummary, durationSeconds, usage, rateLimits, relicSuggestions, relics, trace, nextOptions,
       })),
@@ -935,7 +937,7 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
     // Send the live, possibly-edited focus pool rather than the static
     // bootstrap-time prop — agent_stream.py rebuilds its delegation
     // instruction from this field fresh on every request.
-    const liveAgentConfig = { ...agentConfig, keywords: focusPool }
+    const liveAgentConfig = { ...agentConfig, keywords: focusPool, team }
 
     try {
       await runAgent(apiMessages, liveAgentConfig, (event: StreamEvent) => {
@@ -1001,6 +1003,7 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
             break
 
           case 'done':
+            if (event.team) setTeam(event.team)
             updateLastMessage(msg => ({
               ...msg,
               content: event.response,
@@ -1475,7 +1478,8 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
                 : <p className={styles.bubbleText}>{shownUserText(msg)}</p>
             )}
             {msg.role === 'assistant' && msg.durationSeconds !== undefined && msg.nextOptions && msg.nextOptions.length > 0 && (
-              <div className={styles.nextOptions} role="group" aria-label="Options to continue">
+              <div className={styles.nextOptions} role="group" aria-label="Routes to explore next">
+                <span className={styles.nextOptionsLabel}>Where to next</span>
                 {msg.nextOptions.map(option => (
                   <button
                     key={option}
@@ -1543,14 +1547,6 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
                   </span>
                 )}
               </p>
-            )}
-            {msg.role === 'assistant' && msg.durationSeconds !== undefined && msg.content && (
-              <ResultRating
-                feedback={msg.feedback}
-                onChange={feedback => setMessages(prev => prev.map((m, mi) => (mi === i ? { ...m, feedback } : m)))}
-                onReply={i === messages.length - 1 ? text => sendMessage(text, messages, undefined, undefined, true) : undefined}
-                replyDisabled={thinking}
-              />
             )}
             {/* Only until the live graph appears: once it's up it already shows
                 each step, and this line just repeated it underneath. */}

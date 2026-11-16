@@ -247,6 +247,42 @@ def _starter_reply(focus_pool: list[str], provider, model) -> tuple[str, list[st
     return intro + "\n\nWhich would you like me to take first?", options
 
 
+def _suggest_routes(question: str, reply: str, provider, model) -> list[str]:
+    """2-4 routes to explore next, for a main-agent reply that didn't end
+    with its own ```options fence. One small no-tools call; [] on failure."""
+    try:
+        response = create_chat_completion(
+            provider=provider,
+            model=model,
+            max_tokens=300,
+            messages=[{
+                "role": "user",
+                "content": (
+                    "An AI research agent just answered a request. Propose 2 to 4 "
+                    "distinct routes it could explore next, each going deeper, wider "
+                    "or in a new direction from what the answer found. Each must be "
+                    "something the agent can do with web search and writing. "
+                    "Reply with JSON only, no fence: "
+                    '["<short instruction under 12 words, starting with a verb>", ...]\n\n'
+                    f"<request>{question[:1500]}</request>\n<answer>{reply[:4000]}</answer>"
+                ),
+            }],
+            _trace="Routes to explore next",
+        )
+        text = (response.choices[0].message.content or "").strip()
+        parsed = json.loads(text[text.find("["): text.rfind("]") + 1])
+    except Exception as e:
+        logger.info("route suggestions call failed: %s", e)
+        return []
+    routes: list[str] = []
+    for o in parsed if isinstance(parsed, list) else []:
+        if isinstance(o, str) and o.strip():
+            o = _clip_option(o)
+            if o.lower() not in (r.lower() for r in routes):
+                routes.append(o)
+    return routes[:4]
+
+
 # Confirmed against qwen2.5-coder:7b via Ollama: after a long tool-schema-
 # heavy conversation, the model occasionally answers a plain question (no
 # tool calls at all) with a single bare word echoed from a JSON-schema key
@@ -487,6 +523,51 @@ def _extract_narrated_delegations(text: str) -> list[dict]:
 _MD_LINK_RE = re.compile(r"(!)?\[([^\]]*)\]\(((?:https?://|data:)[^\s)]+)\)")
 _URL_IN_TEXT_RE = re.compile(r"https?://[^\s\"'\\]+")
 _DATA_URI_IN_TEXT_RE = re.compile(r"data:image/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+")
+
+
+def _approx_tokens(msg: dict) -> int:
+    content = msg.get("content") or ""
+    text = content if isinstance(content, str) else json.dumps(content)
+    return len(text) // 4 + 10  # +10/msg for role/formatting overhead
+
+
+_TOOL_STUB_CHARS = 400
+
+
+def _fit_tool_results(messages: list[dict], budget: int) -> list[dict]:
+    """A copy of `messages` whose tool results fit `budget` tokens, for one
+    local-model call. The turn-start trim only sees incoming history; tool
+    results added during the turn (a few fetch_page pages, a base64 image)
+    used to grow the prompt to 50k-340k tokens, which Ollama then cut from
+    the front, system prompt included. Tool messages can't be dropped (each
+    answers an assistant tool_call), so their content is shortened instead:
+    data URIs first, then the oldest results, the newest kept longest.
+    `messages` itself is not changed, so verified-URL checks still see the
+    full results."""
+    total = sum(_approx_tokens(m) for m in messages)
+    if total <= budget:
+        return messages
+    out = [dict(m) for m in messages]
+    tool_idx = [i for i, m in enumerate(out) if m.get("role") == "tool" and isinstance(m.get("content"), str)]
+    for i in tool_idx:
+        before = _approx_tokens(out[i])
+        out[i]["content"] = _DATA_URI_IN_TEXT_RE.sub("[image data omitted - already shown to the user]", out[i]["content"])
+        total -= before - _approx_tokens(out[i])
+    for i in tool_idx:  # oldest first
+        if total <= budget:
+            break
+        content = out[i]["content"]
+        if len(content) <= _TOOL_STUB_CHARS:
+            continue
+        before = _approx_tokens(out[i])
+        out[i]["content"] = content[:_TOOL_STUB_CHARS] + f" ...[cut {len(content) - _TOOL_STUB_CHARS} chars to fit the local model]"
+        total -= before - _approx_tokens(out[i])
+    if total > budget and tool_idx:  # still over: cut the newest one to what's left
+        i = tool_idx[-1]
+        room = max(_TOOL_STUB_CHARS, len(out[i]["content"]) - (total - budget) * 4)
+        if room < len(out[i]["content"]):
+            out[i]["content"] = out[i]["content"][:room] + " ...[cut to fit the local model]"
+    return out
 
 
 def _collect_verified_urls(tool_calls_log: list[dict], history: list) -> list[str]:
@@ -934,6 +1015,134 @@ MAX_DELEGATIONS_PER_REQUEST = 3
 MAX_TOOL_CALLS_PER_TURN = 20
 
 
+# A job keeps the workers it recruits (its team) instead of bootstrapping a
+# fresh one for every delegation. The team rides on AgentConfig["team"]
+# (Chat.tsx stores the `team` from each `done` event), so the backend stays
+# stateless; it's capped at the job's max_delegations, and once full every
+# delegation goes to an existing member.
+_TEAM_RESPONSE_CHARS = 3000
+_TEAM_TASKS_KEPT = 5
+
+
+def _team_from_config(agent_config: dict) -> list[dict]:
+    """The job's team, from the browser's copy of AgentConfig: only entries
+    with a name and a usable config survive."""
+    team = []
+    for m in agent_config.get("team") or []:
+        if not isinstance(m, dict) or not isinstance(m.get("name"), str) or not m["name"].strip():
+            continue
+        cfg = m.get("config")
+        if not isinstance(cfg, dict) or not isinstance(cfg.get("system_prompt"), str):
+            continue
+        tasks = [t for t in (m.get("tasks") or []) if isinstance(t, str)][-_TEAM_TASKS_KEPT:]
+        team.append({
+            "name": m["name"].strip(),
+            "config": cfg,
+            "tasks": tasks,
+            "last_task": m.get("last_task") if isinstance(m.get("last_task"), str) else "",
+            "last_response": m.get("last_response") if isinstance(m.get("last_response"), str) else "",
+        })
+    return team
+
+
+def _team_note(team: list[dict], cap: int) -> str:
+    """Rule 8's addition listing the team, so the main agent reuses it."""
+    if not team:
+        return (
+            f"\n   Workers you recruit join this job's team (at most {cap}) and are "
+            "reused on later turns; a new worker is only recruited when a request "
+            "needs more workers than the team has."
+        )
+    lines = "\n".join(
+        f"   - {m['name']}: " + ("; ".join(t[:120] for t in m["tasks"][-3:]) or "no tasks yet")
+        for m in team
+    )
+    full = len(team) >= cap
+    return (
+        f"\n   YOUR TEAM ({len(team)} of {cap}). Every delegation goes to one of "
+        "them: pass the best-suited member's name as `worker` (they remember "
+        "their last task), giving each member at most one task per reply. "
+        + ("The team is full, so no new workers can be recruited."
+           if full else
+           "A new worker is recruited only when you need more workers at once "
+           "than the team has; for that extra one, leave `worker` out.")
+        + f"\n{lines}"
+    )
+
+
+def _words(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z0-9]+", text.lower()) if len(w) > 2}
+
+
+def _pick_member(team: list[dict], name: str, task: str, busy: set[str], cap: int,
+                 recruiting: int) -> dict | None:
+    """The team member a delegation goes to, or None to recruit a new one.
+    A named member is used as asked. Otherwise an existing member who isn't
+    busy yet this round takes it (the one whose past tasks overlap the new
+    task most); a new worker is recruited only when every member is already
+    busy, i.e. the request needs more workers than the team has, and there's
+    still room. A full team shares the work out instead."""
+    if name:
+        for m in team:
+            if m["name"].lower() == name.strip().lower():
+                return m
+    want = _words(task)
+
+    def overlap(m: dict) -> int:
+        return len(want & _words(" ".join(m["tasks"])))
+
+    idle = [m for m in team if m["name"] not in busy]
+    if idle:
+        return max(idle, key=overlap)
+    if len(team) + recruiting < cap:
+        return None
+    return max(team, key=overlap) if team else None
+
+
+def _remember_worker(team: list[dict], result: dict, worker_config: dict, cap: int) -> None:
+    """Add a newly recruited worker to the team, or update a reused one's
+    task list and last exchange, after it reports back."""
+    name = str(result.get("worker_name") or "Worker").strip() or "Worker"
+    task = str(result.get("task") or "")
+    response = str(result.get("response") or "")[:_TEAM_RESPONSE_CHARS]
+    member = next((m for m in team if m["name"] == name), None) if result.get("reused") else None
+    if member is None:
+        if len(team) >= cap:
+            return
+        taken = {m["name"] for m in team}
+        base, n = name, 2
+        while name in taken:
+            name, n = f"{base} {n}", n + 1
+        result["worker_name"] = name
+        member = {"name": name, "config": worker_config, "tasks": []}
+        team.append(member)
+    member["tasks"] = (member["tasks"] + [task])[-_TEAM_TASKS_KEPT:]
+    member["last_task"] = task
+    member["last_response"] = response
+
+
+def _delegate_tool(team: list[dict]) -> dict:
+    """delegate_to_worker, with a `worker` choice once the job has a team."""
+    if not team:
+        return _DELEGATE_TOOL
+    tool = json.loads(json.dumps(_DELEGATE_TOOL))
+    fn = tool["function"]
+    fn["description"] = (
+        "Hand ONE focused, self-contained subtask to a worker agent and get its "
+        "finished result back. Pass `worker` to reuse a member of your team "
+        "(they keep their toolset and remember their last task); leave it out "
+        "only when every member already has a task this turn and you need "
+        "another worker. The worker does not see this "
+        "conversation — give it everything it needs via `task` and `context`."
+    )
+    fn["parameters"]["properties"]["worker"] = {
+        "type": "string",
+        "enum": [m["name"] for m in team],
+        "description": "Name of the team member to give this task to.",
+    }
+    return tool
+
+
 def _worker_context(context: str, focus_pool: list[str]) -> str:
     """A worker never sees the job's focus topics unless they are passed on;
     without them a task like "<topic>: produce your standard output" left it
@@ -1088,6 +1297,10 @@ def _run_agent_stream(messages: list, agent_config: dict, allow_delegation: bool
     # ollama_model — fall back to the platform defaults when unset (older
     # saved chats/drafts predate these fields).
     max_delegations = agent_config.get("max_delegations") or MAX_DELEGATIONS_PER_REQUEST
+    # The job's team (see _team_from_config); delegations reuse it, and the
+    # updated team goes back on the `done` event.
+    team = _team_from_config(agent_config) if allow_delegation else []
+    team_changed = False
     search_defaults = agent_config.get("search_defaults") or {}
     # Advanced Setup's structured spec (agent_spec.py). Re-normalized here
     # because AgentConfig round-trips through the browser — this is the trust
@@ -1396,7 +1609,7 @@ clarifying question only belongs AFTER you've already produced real findings
    e.g. [Title of the talk](https://www.youtube.com/watch?v=...). The user
    sees it as a player in the reply. Never invent or guess a video URL.
 """ + (f"""
-8. You also have `delegate_to_worker`.{_delegation_rule_body(agent_config.get("keywords") or [], max_delegations)}
+8. You also have `delegate_to_worker`.{_delegation_rule_body(agent_config.get("keywords") or [], max_delegations)}{_team_note(team, max_delegations)}
 9a. Each worker's result has `next_options`: the next moves it devised for
    its own topic. Build YOUR ```options block from those (pick the most
    interesting, merge near-duplicates, at most 4), so the user can choose
@@ -1455,7 +1668,7 @@ clarifying question only belongs AFTER you've already produced real findings
         # The shared tool descriptions mention job boards; for any other
         # agent that steered research towards jobs it was never about.
         primitive_tools = [_strip_job_hint(t) for t in primitive_tools]
-    tools = primitive_tools + ([_DELEGATE_TOOL] if allow_delegation else []) + [
+    tools = primitive_tools + ([_delegate_tool(team)] if allow_delegation else []) + [
         {
             "type": "function",
             "function": {
@@ -1601,11 +1814,6 @@ clarifying question only belongs AFTER you've already produced real findings
         not provider and os.environ.get("LLM_PROVIDER", "").strip().lower() == "ollama"
     )
     if using_ollama and len(current_messages) > 1:
-        def _approx_tokens(msg: dict) -> int:
-            content = msg.get("content") or ""
-            text = content if isinstance(content, str) else json.dumps(content)
-            return len(text) // 4 + 10  # +10/msg for role/formatting overhead
-
         # Reserve room for the tool schemas (sent on every call, not part of
         # current_messages) and for the model's own reply, then spend whatever
         # is left on history, most recent first.
@@ -1626,6 +1834,8 @@ clarifying question only belongs AFTER you've already produced real findings
             current_messages = [current_messages[0]] + kept
     else:
         trimmed_count = 0
+    # Whole-prompt budget for each local call inside the loop (_fit_tool_results).
+    prompt_budget = OLLAMA_NUM_CTX - (len(json.dumps(tools)) // 4) - 2000
 
     # Confirmed live: one nudge attempt is sometimes not enough — a model that
     # narrates-instead-of-calling once will sometimes repeat that exact
@@ -1703,7 +1913,7 @@ clarifying question only belongs AFTER you've already produced real findings
                     model=model,
                     max_tokens=16000,
                     tools=tools,
-                    messages=current_messages,
+                    messages=_fit_tool_results(current_messages, prompt_budget) if using_ollama else current_messages,
                     _meta=call_meta,
                     _trace=f"Agent reasoning (round {iteration + 1})",
                     **sampling,
@@ -2085,6 +2295,15 @@ clarifying question only belongs AFTER you've already produced real findings
                             next_options = []
                         yield _scope_eval("chat_response", None, guard)
 
+                # Every main-agent reply ends with 2-4 routes to explore.
+                if allow_delegation and len(next_options) < 2 and final_text.strip() and not (
+                    scope_guard.active(spec) and guard and guard["verdict"] == "violation"
+                ):
+                    yield _status("Mapping routes to explore next…", "Next routes", "A short call proposes where the job could go from here.")
+                    routes = _suggest_routes(last_user_message, final_text, provider, model)
+                    if len(routes) >= 2:
+                        next_options = routes
+
                 yield _status("Double-checking the reply…", "Self-check", "The finished reply is checked for relevance, links and tool use.")
                 try:
                     for eval_result in eval_checks.check_chat_response(
@@ -2106,6 +2325,9 @@ clarifying question only belongs AFTER you've already produced real findings
                     # The agent's own proposed next moves (REPORT BACK WITH
                     # OPTIONS); Chat.tsx sends one as the next message on click.
                     "next_options": next_options,
+                    # The job's team after this turn; Chat.tsx stores it on
+                    # the AgentConfig so the next turn reuses these workers.
+                    **({"team": team} if team_changed else {}),
                     "duration_seconds": round(time.time() - started_at, 1),
                     "usage": {
                         "input_tokens": total_input_tokens,
@@ -2136,6 +2358,8 @@ clarifying question only belongs AFTER you've already produced real findings
             # parented under it.
             tool_started: dict[int, int] = {}
             worker_span_ids: dict[int, str] = {}
+            busy_members: set[str] = set()  # team members already given a task this round
+            recruiting = 0  # new workers being recruited this round
 
             def _tool_span(idx, tool_name, source, result):
                 failed = isinstance(result, dict) and bool(result.get("error"))
@@ -2235,9 +2459,22 @@ clarifying question only belongs AFTER you've already produced real findings
                         # be circular. Safe here since it's only needed once this
                         # branch actually runs.
                         from orchestrator import run_worker
+                        member = _pick_member(
+                            team, str(tool_inputs.get("worker") or ""), str(tool_inputs.get("task") or ""),
+                            busy_members, max_delegations, recruiting,
+                        )
+                        if member:
+                            busy_members.add(member["name"])
+                        else:
+                            recruiting += 1
                         if executor is None:
+                            # Local Ollama serves one request at a time
+                            # (OLLAMA_NUM_PARALLEL=1), so parallel workers
+                            # only interleave on the GPU and all finish late.
+                            # One at a time, each finishes (and shows its
+                            # card) as soon as its own calls are done.
                             executor = concurrent.futures.ThreadPoolExecutor(
-                                max_workers=max_delegations
+                                max_workers=1 if using_ollama else max_delegations
                             )
                         future = executor.submit(
                             run_worker,
@@ -2248,6 +2485,7 @@ clarifying question only belongs AFTER you've already produced real findings
                             search_defaults=search_defaults,
                             agent_type=agent_config.get("template"),
                             location=_location or None,
+                            member=member,
                         )
                         pending_workers[idx] = (future, tc, tool_name, tool_inputs, source)
                         worker_span_ids[idx] = run_trace.new_id()
@@ -2313,6 +2551,7 @@ clarifying question only belongs AFTER you've already produced real findings
                     # before the result is shown to the main agent, and file
                     # them under this worker's span.
                     worker_spans = result.pop("trace", []) if isinstance(result, dict) else []
+                    worker_config = result.pop("worker_config", None) if isinstance(result, dict) else None
                     run_trace.extend(run_trace.adopt(worker_spans, worker_span_ids[idx]))
                     run_trace.record(
                         "worker", (result.get("worker_name") if isinstance(result, dict) else None) or "Worker",
@@ -2336,6 +2575,9 @@ clarifying question only belongs AFTER you've already produced real findings
                             if guard["verdict"] == "violation":
                                 result["response"] = scope_guard.withheld_worker_response(guard["reason"])
                             yield _scope_eval("worker_delegation", result.get("worker_name"), guard)
+                    if isinstance(worker_config, dict) and isinstance(result.get("response"), str):
+                        _remember_worker(team, result, worker_config, max_delegations)
+                        team_changed = True
                     result_str = _finish(tc, tool_name, tool_inputs, result, source)
                     yield {"type": "tool_result", "tool": tool_name, "result": result_str, "source": source, "call_index": idx}
                     tool_def = tool_def_map.get(tool_name)

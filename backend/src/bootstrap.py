@@ -30,7 +30,7 @@ Design and configure this agent. Return a single JSON object with exactly these 
     "traits": ["<adjective>", "<adjective>", "<adjective>"],
     "rationale": "<one sentence connecting the name/traits to the stated purpose>"
   }},
-  "intro": "<2-4 sentences, first person, in this persona's voice, greeting a user who may be new: what you're here to do for them and how to get started (e.g. what to ask or give you first). Do not state your own name. Plain prose — no markdown, no tool names in snake_case>",
+  "intro": "<2-4 sentences, first person, in this persona's voice, greeting a user who may be new: what you're here to do for them and how to get started (e.g. what to ask or give you first). Speak to the actual subject in the purpose above, by name when it names topics (e.g. \"Augustus\"), not to a general capability like \"any topic\" or \"anything you're curious about\". Do not state your own name. Plain prose — no markdown, no tool names in snake_case>",
   "system_prompt": "<detailed role and behaviour instructions for the agent>",
   "tools": [
     {{

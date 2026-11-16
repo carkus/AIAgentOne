@@ -1516,6 +1516,12 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     setOpenSavedSections(prev => ({ ...prev, [section]: !prev[section] }))
   }
 
+  // The failure panel's Dismiss hides it until the next deploy attempt.
+  const [errorDismissed, setErrorDismissed] = useState(false)
+  useEffect(() => {
+    if (bootstrapping) setErrorDismissed(false)
+  }, [bootstrapping])
+
   // Extracted from handleSubmit so a post-error "Retry" button can re-run the
   // exact same commission attempt (form state is untouched after a failed
   // bootstrap — Setup stays mounted across setup/bootstrapping phases) without
@@ -1679,7 +1685,8 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
               </div>
             </div>
             <div className={ah.actions}>
-              <div className={`${ah.group} ${styles.topTools}`} role="group" aria-label="Agent controls">
+              <div className={styles.topToolsRow}>
+              <div className={`${ah.group} ${styles.topTools}`} role="group" aria-label="Saved agents">
                 <button
                   type="button"
                   className={`${ah.btn} ${ah.btnText} ${poolOpen ? ah.btnOpen : ''}`}
@@ -1703,15 +1710,18 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                 >
                   <SaveIcon />
                 </button>
+              </div>
+              <div className={`${ah.group} ${styles.topTools}`} role="group" aria-label="New agent">
                 <button
                   type="button"
-                  className={ah.btn}
+                  className={`${ah.btn} ${ah.btnText}`}
                   onClick={ev => { ev.stopPropagation(); setCharacterGenOpen(true) }}
                   disabled={bootstrapping}
-                  title="Open Agent: generate a character"
-                  aria-label="Open agent"
+                  title="New Agent: generate a character"
+                  aria-label="New agent"
                 >
                   <OpenAgentIcon />
+                  <span>New Agent</span>
                 </button>
                 {onOpenAdvanced && (
                   <button
@@ -1725,6 +1735,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                     <AdvancedIcon />
                   </button>
                 )}
+              </div>
               </div>
             <div className={`${styles.locationMap} ${!factorLocation ? styles.locationMapOff : ''}`}>
               <button
@@ -2832,7 +2843,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
         </div>
 
         {/* Bootstrap progress lives on the shield; only a failure is shown here. */}
-        {!bootstrapping && error && (
+        {!bootstrapping && error && !errorDismissed && (
           <div className={styles.setupError}>
           <div className={styles.errorPanel}>
             <span className={styles.errorIcon} aria-hidden="true">⚠</span>
@@ -2843,6 +2854,9 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
               </div>
               <button type="button" className={styles.errorRetry} onClick={runBootstrap}>
                 ↻ Retry
+              </button>
+              <button type="button" className={styles.errorRetry} onClick={() => setErrorDismissed(true)}>
+                Dismiss
               </button>
             </div>
           </div>

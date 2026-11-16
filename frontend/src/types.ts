@@ -86,6 +86,15 @@ export interface BootstrapReport {
   memory?: 'recorded' | 'skipped_restricted';
 }
 
+// One worker on the job's team, as agent_stream.py's _remember_worker keeps it.
+export interface TeamMember {
+  name: string;
+  config: Record<string, unknown>;
+  tasks: string[];
+  last_task?: string;
+  last_response?: string;
+}
+
 export interface AgentConfig {
   purpose: string;
   // Timed spans of the bootstrap that generated this config (bootstrap.py's
@@ -115,6 +124,9 @@ export interface AgentConfig {
   // agent_stream.py tells the agent to work toward them and always offers
   // them as relic buttons on research turns.
   deliverables?: Deliverable[];
+  // The job's workers (agent_stream.py's team): reused by later turns
+  // instead of bootstrapping new ones. Set from each `done` event's team.
+  team?: TeamMember[];
   location?: string;
   // "Factor in location" on Setup. Absent = the type's default (on only for
   // job_search); agent_stream.py drops the location when false.
@@ -288,6 +300,8 @@ export type StreamEvent =
       // The agent's proposed next moves for the job (agent_stream.py's
       // REPORT BACK WITH OPTIONS); each is sent as the next message on click.
       next_options?: string[];
+      // The job's team after this turn, sent when it changed.
+      team?: TeamMember[];
     }
   | { type: 'error'; message: string }
 

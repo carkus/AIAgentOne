@@ -28,6 +28,7 @@ import asyncio
 import concurrent.futures
 import logging
 import os
+import time
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -38,6 +39,12 @@ from mcp_registry import MCP_SERVERS
 logger = logging.getLogger(__name__)
 
 _catalog_cache: dict[str, list[dict]] = {}
+# server_id -> monotonic time of its last failed listing. A server that
+# failed isn't retried for _FAILURE_RETRY_SECONDS: without this, every
+# catalog_summary() call (several per bootstrap, one bootstrap per worker)
+# respawned the failing server and waited for it again, ~4-5s each time.
+_failed_at: dict[str, float] = {}
+_FAILURE_RETRY_SECONDS = 300
 
 # Neither the stdio subprocess round trip nor the Streamable HTTP session has
 # any timeout of its own — a vetted server that hangs (crashed subprocess
@@ -109,10 +116,22 @@ async def _list_tools_async(server_id: str) -> list[dict]:
                     "server_id": server_id,
                     "tool_name": t.name,
                     "description": t.description or "",
-                    "input_schema": t.inputSchema or {"type": "object", "properties": {}},
+                    "input_schema": _field(t, "input_schema", "inputSchema") or {"type": "object", "properties": {}},
                 }
                 for t in result.tools
             ]
+
+
+def _field(obj, *names):
+    """First attribute present among `names`. The mcp SDK renamed its
+    camelCase fields to snake_case in 2.x (inputSchema -> input_schema,
+    isError -> is_error); requirements.txt doesn't pin a major version, so
+    read either spelling."""
+    for name in names:
+        value = getattr(obj, name, None)
+        if value is not None:
+            return value
+    return None
 
 
 async def _call_tool_async(server_id: str, tool_name: str, inputs: dict):
@@ -132,7 +151,7 @@ def _unpack_result(result) -> object:
     texts = [b.text for b in blocks if getattr(b, "type", None) == "text" and hasattr(b, "text")]
     if texts and len(texts) == len(blocks):
         text = "\n".join(texts)
-        if getattr(result, "isError", False):
+        if _field(result, "is_error", "isError"):
             return {"error": text}
         return text
     parts = []
@@ -141,7 +160,7 @@ def _unpack_result(result) -> object:
             parts.append(b.model_dump())
         else:
             parts.append(str(b))
-    if getattr(result, "isError", False):
+    if _field(result, "is_error", "isError"):
         return {"error": parts}
     return parts
 
@@ -168,11 +187,16 @@ def list_tools(server_id: str) -> list[dict]:
         return _catalog_cache[server_id]
     if server_id not in MCP_SERVERS:
         return []
+    failed_at = _failed_at.get(server_id)
+    if failed_at is not None and time.monotonic() - failed_at < _FAILURE_RETRY_SECONDS:
+        return []
     try:
         tools = _run(_list_tools_async(server_id))
         _catalog_cache[server_id] = tools
+        _failed_at.pop(server_id, None)
         return tools
     except Exception as e:
+        _failed_at[server_id] = time.monotonic()
         logger.warning(
             "MCP server '%s' unavailable, omitting from catalog: %s",
             server_id, _describe_exception(e), exc_info=True,

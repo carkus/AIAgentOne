@@ -691,7 +691,7 @@
   padding: 0.3rem;
   background: #f2efe9;
   border: 1px solid #ebe7de;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
 }
 
 /* Equal-sized icon buttons; the title/aria-label carries the name. */
@@ -743,7 +743,6 @@
   display: flex;
   align-items: center;
   gap: 0.3rem;
-  margin-left: 0.6rem;
   padding: 0.2rem;
   background: #d9eaf2;
   border: 1px solid #b4d2df;
@@ -752,6 +751,14 @@
 
 /* The header's Agent controls, styled like the bottom toolbar's output
    group (blue group, steel-blue buttons), without the tan panel. */
+/* Holds the two top tool panels side by side, left of the location. */
+.topToolsRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .topTools {
   gap: 0.3rem;
   padding: 0.2rem;

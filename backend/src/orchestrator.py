@@ -18,6 +18,8 @@ Scope of this first pass, deliberately kept small:
   bounds cost: each delegation is a full extra bootstrap call plus its own
   agent loop, so an unbounded main agent could otherwise fan out unboundedly.
 """
+import copy
+
 from bootstrap import generate_agent_config
 import eval_checks
 import eval_log
@@ -26,7 +28,7 @@ import run_trace
 
 def run_worker(task: str, context: str, provider: str | None, model: str | None,
                 search_defaults: dict | None = None, agent_type: str | None = None,
-                location: str | None = None) -> dict:
+                location: str | None = None, member: dict | None = None) -> dict:
     """
     _run_worker with its run trace attached. Workers run in agent_stream's
     thread pool, which doesn't see the parent's span sink, so this opens one
@@ -36,7 +38,7 @@ def run_worker(task: str, context: str, provider: str | None, model: str | None,
     """
     prev_sink = run_trace.open_sink()
     try:
-        result = _run_worker(task, context, provider, model, search_defaults, agent_type, location)
+        result = _run_worker(task, context, provider, model, search_defaults, agent_type, location, member)
     finally:
         spans = run_trace.close_sink(prev_sink)
     result["trace"] = spans + result.pop("_loop_trace", [])
@@ -45,7 +47,7 @@ def run_worker(task: str, context: str, provider: str | None, model: str | None,
 
 def _run_worker(task: str, context: str, provider: str | None, model: str | None,
                 search_defaults: dict | None = None, agent_type: str | None = None,
-                location: str | None = None) -> dict:
+                location: str | None = None, member: dict | None = None) -> dict:
     """
     Bootstrap and run one worker agent to completion for `task`.
 
@@ -61,12 +63,22 @@ def _run_worker(task: str, context: str, provider: str | None, model: str | None
     same way it already does for the main agent's own. `fewshot_count` is
     how many past similar bootstraps grounded *this worker's* config (0 if
     none) — see bootstrap.generate_agent_config's docstring.
+
+    `member` is an existing worker from the job's team (agent_stream's
+    _team_from_config: {"name", "config", "last_task", "last_response"}).
+    When given, its config is reused instead of bootstrapping a new worker,
+    and its previous task and answer come before the new task so it carries
+    on from where it left off. The result's "worker_config" (popped by
+    agent_stream before the main agent sees it) is what joins the team.
     """
     # Deferred import: agent_stream imports this module (lazily, only when
     # delegate_to_worker is actually called) to build _DELEGATE_TOOL's
     # handler, so importing it back at module load time here would be a
     # circular import. Importing inside the function breaks the cycle.
     from agent_stream import run_agent_stream
+
+    if member:
+        return _run_member(task, context, provider, model, member)
 
     try:
         # is_worker=True buckets this bootstrap separately in bootstrap_memory
@@ -131,6 +143,41 @@ def _run_worker(task: str, context: str, provider: str | None, model: str | None
     # reads it from the config.
     if location:
         worker_config["location"] = location
+    result = _run_loop(task, context, provider, model, worker_config, worker_name, [], eval_results)
+    result["fewshot_count"] = fewshot_count
+    # The tagged config (template, search defaults, location) is what joins
+    # the team, so a reused worker keeps the parent's settings.
+    result["worker_config"] = copy.deepcopy(worker_config)
+    return result
+
+
+def _run_member(task: str, context: str, provider: str | None, model: str | None,
+                member: dict) -> dict:
+    """Run an existing team member on a new task: no bootstrap, its own
+    config, and its last exchange as history."""
+    worker_config = copy.deepcopy(member["config"])
+    persona = worker_config.get("persona") or {}
+    worker_name = member.get("name") or persona.get("name", "Worker")
+    history: list[dict] = []
+    if member.get("last_task") and member.get("last_response"):
+        history = [
+            {"role": "user", "content": member["last_task"]},
+            {"role": "assistant", "content": member["last_response"]},
+        ]
+    result = _run_loop(task, context, provider, model, worker_config, worker_name, history, [])
+    result["fewshot_count"] = 0
+    result["reused"] = True
+    result["worker_config"] = member["config"]
+    return result
+
+
+def _run_loop(task: str, context: str, provider: str | None, model: str | None,
+              worker_config: dict, worker_name: str, history: list[dict],
+              eval_results: list[dict]) -> dict:
+    """The worker's own agent loop, then its delegation-fit check."""
+    from agent_stream import run_agent_stream
+
+    persona = worker_config.get("persona") or {}
     user_content = task if not context else f"{task}\n\nContext:\n{context}"
 
     final_response = ""
@@ -139,7 +186,7 @@ def _run_worker(task: str, context: str, provider: str | None, model: str | None
     loop_trace: list[dict] = []
     try:
         for event in run_agent_stream(
-            [{"role": "user", "content": user_content}],
+            history + [{"role": "user", "content": user_content}],
             worker_config,
             allow_delegation=False,
         ):
@@ -189,7 +236,6 @@ def _run_worker(task: str, context: str, provider: str | None, model: str | None
         # other way to reach the actual tool result to offer a "view image"
         # button for it.
         "tool_results": [tc["result"] for tc in tool_calls],
-        "fewshot_count": fewshot_count,
         "eval_results": eval_results,
         "_loop_trace": loop_trace,
     }
