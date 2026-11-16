@@ -1,54 +1,83 @@
 # Running Locally
 
-Two terminals required — one for the backend (Flask), one for the frontend (Vite).
+Two terminals: one for the backend (Flask), one for the frontend (Vite). A
+third is optional, for the MCP server.
 
-> **No Docker or SAM required for local development.** The backend runs as a plain Python Flask server. SAM and Docker are only needed when deploying to AWS or testing Lambda-specific behaviour.
+> **No Docker or SAM needed.** The backend runs as a plain Python Flask
+> server. The SAM/Lambda path in the repo (`template.yaml`) is dev-only
+> tooling and isn't how the app is deployed; see [DEPLOY.md](./DEPLOY.md).
 
 ---
 
 ## Prerequisites
 
 | Tool | Version | Install | Verify |
-|------|---------|---------|--------|
+| --- | --- | --- | --- |
 | Python | 3.12+ | [python.org](https://www.python.org/downloads/) | `python --version` |
 | Node.js | 18+ | [nodejs.org](https://nodejs.org/) | `node --version` |
-| Gemini API key | — | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | — |
-| Ollama (optional, local-only fallback) | — | [ollama.com](https://ollama.com/) | `ollama list` |
+| A model provider | — | see below | — |
+
+You need at least one model provider. The backend tries them in this order
+and skips any that isn't configured:
+
+1. **Gemini**: an API key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
+2. **Cloudflare Workers AI** (hosted Qwen): an account ID and an API token
+   with the "Workers AI" permission.
+3. **Ollama** (local, free): [ollama.com](https://ollama.com/), then
+   `ollama pull qwen3:8b` (the default model). Start the Ollama server with
+   `OLLAMA_CONTEXT_LENGTH=16384`. Ollama ignores the context size the API
+   asks for, so without it prompts are cut to about 2k tokens and bootstrap
+   fails in odd ways.
 
 ---
 
-## Step 1 — Configure environment
+## Step 1: Configure environment
 
-Create `env.json` in the project root. The backend server reads credentials from this file automatically.
+Create `env.json` in the project root. `backend/server.py` reads it on
+startup. The section names don't matter: every non-empty value in every
+section is loaded as an environment variable, unless that variable is
+already set.
 
 ```json
 {
-  "BootstrapFunction": {
-    "GEMINI_API_KEY": "your-gemini-key-here"
-  },
-  "AgentFunction": {
-    "GEMINI_API_KEY": "your-gemini-key-here",
+  "Backend": {
+    "GEMINI_API_KEY": "your-gemini-key",
+    "CLOUDFLARE_ACCOUNT_ID": "your-account-id",
+    "CLOUDFLARE_API_TOKEN": "your-workers-ai-token",
+    "TAVILY_API_KEY": "your-tavily-key",
+    "HF_API_TOKEN": "your-huggingface-token",
     "ADZUNA_APP_ID": "your-app-id",
     "ADZUNA_APP_KEY": "your-app-key"
   }
 }
 ```
 
-> To use the local-only Ollama fallback instead of/alongside Gemini, no key is needed — just have `ollama serve` running with a model pulled (`ollama pull qwen2.5-coder`). Set `OLLAMA_MODEL`/`OLLAMA_BASE_URL` env vars to override the defaults, or `LLM_PROVIDER=ollama` to force it. See [CLAUDE.md](./CLAUDE.md) for the full cascade behaviour.
->
+Leave out any you don't have. Only one model provider is required. The
+others turn on optional features:
+
+- `TAVILY_API_KEY`: general web search, as a vetted MCP tool
+- `HF_API_TOKEN`: image-generation fallback
+- `ADZUNA_APP_*`: the job-search agent type's `search_jobs` tool
+
+Ollama needs no key. `OLLAMA_MODEL` and `OLLAMA_BASE_URL` override its
+defaults, `LLM_PROVIDER=ollama` forces it, and `DISABLE_OLLAMA=1` removes it.
+See [`.env.example`](./.env.example) for every variable and
+[CLAUDE.md](./CLAUDE.md) for the full cascade behaviour.
+
 > **Keep `env.json` out of source control.** It is already listed in `.gitignore`.
 
 Create `frontend/.env.local`:
 
-```
+```text
 VITE_API_URL=
 ```
 
-> Leave `VITE_API_URL` empty. The Vite dev server proxies `/bootstrap` and `/agent` to `localhost:4891` automatically — no value needed.
+> Leave `VITE_API_URL` empty. The Vite dev server proxies the API routes
+> to `localhost:4891`, so no value is needed.
 
 ---
 
-## Step 2 — Install backend dependencies
+## Step 2: Install backend dependencies
 
 ```powershell
 pip install -r backend/requirements.txt
@@ -56,7 +85,7 @@ pip install -r backend/requirements.txt
 
 ---
 
-## Step 3 — Install frontend dependencies
+## Step 3: Install frontend dependencies
 
 ```powershell
 cd frontend
@@ -66,7 +95,9 @@ cd ..
 
 ---
 
-## Step 4 — Start the backend (Terminal 1)
+## Step 4: Start the backend (Terminal 1)
+
+From the project root:
 
 ```powershell
 python backend/server.py
@@ -74,38 +105,38 @@ python backend/server.py
 
 Expected output:
 
-```
+```text
 Starting local dev server on http://localhost:4891
  * Running on http://127.0.0.1:4891
 ```
 
-The server reads `env.json` on startup and hot-reloads when you edit files in `backend/src/`.
+Server-side data (bootstrap memory, eval history, saved profiles, published
+agents) goes in `data/agentone.db`, next to `backend/`.
 
 ---
 
-## Step 4.5 — Start the MCP server (Terminal 3, optional)
+## Step 4.5: Start the MCP server (Terminal 3, optional)
 
-Only needed if you want to test AgentOne's own MCP-server side (published
-agents exposed as MCP tools other clients can call — see
-[CLAUDE.md](./CLAUDE.md)'s "AgentOne as an MCP server" section). It's a
-separate process from the Flask backend, since the `mcp` SDK's HTTP
-transport is ASGI, not WSGI:
+Only needed to test AgentOne's own MCP-server side: published agents exposed
+as MCP tools that other clients can call (see the "AgentOne as an MCP
+server" section of [CLAUDE.md](./CLAUDE.md)). It's a separate process from
+the Flask backend, since the `mcp` SDK's HTTP transport is ASGI, not WSGI:
 
 ```powershell
 python backend/mcp_server.py
 ```
 
-```
+```text
 Starting MCP server on http://localhost:4892/mcp
 ```
 
-Publish an agent first (the "Publish as MCP tool" button in Chat, after
-bootstrapping and chatting with one), then point any MCP client at
-`http://localhost:4892/mcp`.
+Publish an agent first: deploy one, use it, then click the **Roster**
+button in the agent header and choose **Add to Roster**. Then point any MCP
+client at `http://localhost:4892/mcp`.
 
 ---
 
-## Step 5 — Start the frontend (Terminal 2)
+## Step 5: Start the frontend (Terminal 2)
 
 ```powershell
 cd frontend
@@ -114,65 +145,77 @@ npm run dev
 
 Expected output:
 
-```
+```text
   VITE v5.x.x  ready in xxx ms
 
-  ➜  Local:   http://localhost:19173/
+  ➜  Local:   http://localhost:5273/
 ```
 
-Open [http://localhost:19173](http://localhost:19173) in your browser.
+Open [http://localhost:5273](http://localhost:5273) in your browser.
 
 ---
 
 ## Verifying It Works
 
-1. The app loads and shows the **Setup** screen with a text area
-2. Type a purpose (e.g. `Research a company and write a one-page summary`)
-3. Click **Create Agent** — the UI shows "Configuring agent..." for ~10 seconds
-4. The **Chat** screen appears with the generated tool badges at the top
-5. Send a message — tool calls appear live as the agent works, then the final response arrives
+1. The app loads on the **Setup** screen, with the 1–4 steps (Character,
+   Focus, Brief, Outputs) above a process graph.
+2. **Character:** pick an agent type (personality and behaviours are
+   optional).
+3. **Focus:** add one or two topics.
+4. **Brief:** a drafted brief and a brief graph appear (a few seconds on
+   Gemini; longer on a local model).
+5. **Outputs:** the agent proposes deliverables, with its picks ticked.
+6. Click **Deploy**. The graph shows bootstrap's stages (grounding, design,
+   one node per tool, checks) until the agent opens.
+7. The agent starts on its focus topics: tool calls and worker cards stream
+   in live, then the report arrives.
 
-If step 3 errors, check the backend terminal for the Python traceback.
+If Deploy fails, check the backend terminal for the Python traceback.
 
 ---
 
 ## Making Backend Changes
 
-The Flask server hot-reloads automatically. Edit any file in `backend/src/`, save, and the next request picks up the change — no restart needed.
+The backend doesn't reload by itself. After editing `backend/server.py` or
+anything in `backend/src/`, stop it (Ctrl+C) and run
+`python backend/server.py` again. The same goes for `backend/mcp_server.py`.
 
 ---
 
 ## Making Frontend Changes
 
-Vite hot-reloads automatically. Edit any file in `frontend/src/` and the browser updates instantly.
+Vite hot-reloads automatically. Edit any file in `frontend/src/` and the
+browser updates instantly.
 
 ---
 
 ## Changing the Port
 
-The backend defaults to port `4891` (deliberately not `3000`/`5000`/`8000`, which tend to collide with other projects' dev servers). If `4891` is also taken, override it:
+The backend defaults to port `4891` (deliberately not `3000`/`5000`/`8000`,
+which tend to collide with other projects' dev servers). If `4891` is also
+taken, override it:
 
 ```powershell
 $env:PORT=3987
 python backend/server.py
 ```
 
-Then update `frontend/vite.config.ts` to proxy to the new port — it has five routes to change (`/bootstrap`, `/agent`, `/file`, `/models`, `/saved-searches`):
+Then change every target in the `proxy` block of `frontend/vite.config.ts`
+from `http://localhost:4891` to the new port. There is one entry per API
+route (`/bootstrap`, `/agent`, `/brief`, `/relic`, `/agents`, `/models`, …).
 
-```ts
-proxy: {
-  '/bootstrap': 'http://localhost:3987',
-  '/agent': 'http://localhost:3987',
-  '/agents': 'http://localhost:3987',
-  '/file': 'http://localhost:3987',
-  '/models': 'http://localhost:3987',
-  '/saved-searches': 'http://localhost:3987',
-}
-```
+The frontend's own port, `5273`, is set in the same file with
+`strictPort: true`, so Vite stops with an error instead of picking another
+port if it's taken.
 
-The MCP server (`backend/mcp_server.py`) has its own port, `4892`, overridable via `MCP_PORT` — it's a separate process from the Flask backend, not proxied by Vite (MCP clients connect to it directly, not through the frontend).
+The MCP server (`backend/mcp_server.py`) has its own port, `4892`, which you
+can override with `MCP_PORT`. It's a separate process from the Flask backend
+and isn't proxied by Vite: MCP clients connect to it directly, not through
+the frontend.
 
-**Auth:** unset `MCP_API_KEY` locally (the default) leaves `/mcp` open, same as today. Set `MCP_API_KEY` to require every request to send a matching `X-Api-Key` header (or `?key=` query param) — see DEPLOY.md for the production story.
+**Auth:** with `MCP_API_KEY` unset (the default locally), `/mcp` is open.
+Set it to require every request to send a matching `X-Api-Key` header (or
+`?key=` query parameter). See DEPLOY.md for production.
 
 ---
 
@@ -188,50 +231,44 @@ pip install -r backend/requirements.txt
 
 ---
 
-**`Bootstrap failed` or request returns an error immediately**
+**`Bootstrap failed` or a request returns an error immediately**
 
 Open browser DevTools → Network tab and check the `/bootstrap` request:
 
-- `net::ERR_CONNECTION_REFUSED` → the backend isn't running. Start it with `python backend/server.py`.
-- `500` response → check the backend terminal for the Python traceback.
+- `net::ERR_CONNECTION_REFUSED` or a Vite proxy error: the backend isn't
+  running. Start it with `python backend/server.py`.
+- `500` response: check the backend terminal for the Python traceback.
 
 ---
 
-**Browser console shows CORS error**
+**Browser console shows a CORS error**
 
-The Flask server handles CORS directly, so this should not occur. If it does, confirm `frontend/.env.local` has `VITE_API_URL=` (empty, not `http://localhost:4891`) and that the Vite dev server was restarted after the change.
+The Flask server handles CORS directly, so this should not occur. If it
+does, confirm `frontend/.env.local` has `VITE_API_URL=` (empty, not
+`http://localhost:4891`) and restart the Vite dev server.
 
 ---
 
 **Bootstrap returns `Unterminated string` / JSON parse error**
 
-Claude's response was cut off before finishing the JSON. This means `max_tokens` in `bootstrap.py` was too low for the generated config. It is currently set to `16000`, which should be sufficient. If it recurs with a very detailed purpose description, try simplifying the description.
+The model's reply was cut off before it finished the JSON. On Ollama, the
+usual cause is the 2k-token context: restart the Ollama server with
+`OLLAMA_CONTEXT_LENGTH=16384`. Otherwise `max_tokens` in `bootstrap.py` is
+`16000`, which should be enough; if it recurs, try fewer focus topics.
 
 ---
 
-**`env.json` credentials not being picked up**
+**Only Ollama is offered, or a cloud provider is missing from Settings**
 
-The server loads `env.json` from the project root (the directory containing `backend/` and `frontend/`). Make sure you are running `python backend/server.py` from the project root, not from inside `backend/`.
+A provider appears only when its credentials load. Check that the key is
+spelled correctly and isn't empty in `env.json`. Also check that you
+started `python backend/server.py` from the project root (the folder that
+contains `backend/` and `frontend/`), since that's where it looks for
+`env.json`.
 
 ---
 
-## Deploying to AWS
+## Deploying
 
-SAM and Docker are only needed for deployment:
-
-```powershell
-# Install SAM CLI: https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html
-sam build --use-container
-sam deploy --guided   # first time — prompts for GeminiApiKey and other params
-sam deploy            # subsequent deploys
-```
-
-After deploy, build the frontend with the API Gateway URL from SAM outputs:
-
-```powershell
-cd frontend
-$env:VITE_API_URL="https://<api-id>.execute-api.<region>.amazonaws.com/Prod"
-npm run build
-```
-
-Host `frontend/dist/` on S3 + CloudFront, Amplify, or Netlify.
+Production runs on a systemd + nginx droplet, shipped with
+`deploy/redeploy.sh`. See [DEPLOY.md](./DEPLOY.md).

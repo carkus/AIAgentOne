@@ -1,297 +1,278 @@
-# AI Agent One — Self-Scaffolding Agent Platform
+# AI Agent One — a self-scaffolding agent platform
 
-Most AI tools make you fit your problem to their interface. This one works the other way around.
+Most AI tools make you fit your problem to their interface. Agent One works
+the other way round.
 
-Describe what you want an agent to do — in plain language, no configuration files, no code — and the platform builds it: the role, the tools, the implementation. A job market researcher. A competitive analysis engine. A document processor. A data pipeline. Each one purpose-built, on demand, ready to work.
+You describe the agent you want: its character, the topics it should focus
+on, and the outputs you'd like back. The platform then builds it: the system
+prompt, the persona and the tools, including Python implementations written
+on the spot. A researcher on grid storage, an analyst comparing two
+frameworks, a historian of the Roman era. Each one is purpose-built on
+demand, with no code changes between them.
 
-And once it starts, it doesn't forget. Every tool call, every search result, every piece of analysis stays in context. Ask follow-up questions, dig deeper, change direction — the agent carries the full thread of the conversation. It's not a one-shot query tool. It's a researcher you can talk to.
+Once deployed, the agent leads a small team. A research turn is split across
+2–3 worker agents (by angle or by topic), each bootstrapped with its own
+persona and tools. The main agent then writes one report from what they
+found, rather than repeating each worker's findings. Every step, from model
+calls to tool calls, workers and self-checks, is recorded in a case file you
+can open under each reply.
 
-The platform can also delegate: a request naming several distinct topics ("Python developer, React developer, DevOps engineer" — or "renewable energy, EV batteries, grid storage") spins up one disposable worker agent per topic, each with its own tools, searching and reporting back independently, capped at 6 per turn.
-
-While a turn is working — thinking, retrying a weak reply, reviewing tool results, double-checking its own answer — the chat UI shows what's actually happening instead of a bare spinner, so background work never looks stalled.
-
----
-
-## What You Can Do With It
-
-Tell it what you need. It figures out the rest.
-
-```
-"Research Flutter developer job availability in Melbourne —
- volume, seniority mix, salary ranges, top hiring companies."
-```
-
-The agent bootstraps itself with the right tools for that task — job board search, data analysis, report writing — then works through the problem autonomously, calling tools in sequence, reasoning over results, and delivering a structured answer. Where the findings are a comparison, a distribution, or a multi-step flow, the agent draws a Mermaid diagram instead of a wall of prose.
-
-Then keep going:
-
-> *"Which of those companies had the highest salary range?"*
-> *"Now filter to senior roles only and compare the demand."*
-> *"Summarise everything into a table I can share."*
-
-The agent remembers everything. The full conversation history travels with every request. Treat it like talking to a specialist who did the work and is sitting there ready for follow-up — not a search box you ping once and move on from.
+The "agent as spy" theming (dossiers, case files, commissions) is deliberate.
 
 ---
 
-## How It Works
+## What it does
 
-```
-┌───────────────────────────────────────────────────────────────┐
-│  Phase 1: Bootstrap  (POST /bootstrap, streamed)               │
-│                                                                 │
-│  User describes purpose                                        │
-│       │                                                         │
-│       ▼                                                         │
-│  Gemini (⟶ Ollama fallback, dev-only) generates AgentConfig:   │
-│    • system_prompt  — role, personality, approach              │
-│    • tools[]        — name, description, input_schema, and     │
-│                        either a Python implementation string   │
-│                        or a source: "mcp" reference to a real,  │
-│                        vetted MCP server tool                  │
-│  Grounded by: 1-2 similar past bootstraps (RAG, bootstrap_memory)│
-│               + the live vetted-MCP-server tool catalog        │
-│                                                                 │
-│  Result stored in React state as AgentConfig                   │
-└───────────────────────────────────────────────────────────────┘
+### 1. Build the agent (Setup)
 
-┌───────────────────────────────────────────────────────────────┐
-│  Phase 2: Agent Loop  (POST /agent, streamed NDJSON)           │
-│                                                                 │
-│  User sends message                                             │
-│       │                                                         │
-│       ▼                                                         │
-│  Gemini (⟶ Ollama fallback, dev-only) runs with dynamic tools  │
-│       │                                                         │
-│       ├── tool_use (generated)  → exec() the implementation     │
-│       ├── tool_use (source:mcp) → route to the real MCP server  │
-│       ├── tool_use (delegate_to_worker) → bootstrap + run a     │
-│       │      one-shot worker agent, hand back its result        │
-│       └── end_turn → final response streamed to the UI          │
-└───────────────────────────────────────────────────────────────┘
-```
+Setup is four steps, drawn as a live process graph as you go:
 
-A bootstrapped agent that's actually been exercised in chat can also be
-**published** as a standing MCP tool (`backend/mcp_server.py`, its own
-process), so any MCP client — Claude Desktop, Claude Code, another AgentOne
-instance — can call it directly, not just this project's own frontend.
+| Step | What happens |
+| --- | --- |
+| **Character** | Agent type (General tasks, Researcher, Job search), plus stackable personality and behaviour pills (Concise, Skeptical, Cite Sources, Proactive, …). |
+| **Focus** | The topics the agent works on. Smart Focus embeds them to flag near-duplicate topics and suggest related ones you've saved before. |
+| **Brief** | An LLM drafts a short brief interpreting what the chosen topics mean together, plus a graph of how the agent will approach the job. |
+| **Outputs** | The agent proposes 3–5 deliverables for the job (report, chart, spreadsheet, slide deck, …), with its own picks pre-ticked. |
+
+**Deploy** then streams the bootstrap: grounding, design, one node per
+generated tool, code checks and self-checks. Saved agent profiles can be
+reloaded with **Load Agent**. A profile that has already been built
+relaunches without bootstrapping again.
+
+**Advanced Setup** keeps the agent's intent as a structured spec (mission,
+success criteria, out-of-scope topics, allowed tools, limits). It routes each
+field to the layer that can actually enforce it. Before launch you can
+review and edit the generated config, which is re-validated server-side.
+
+### 2. Run it (Deploy)
+
+- **Streaming agent loop.** Tool calls, worker cards and status messages
+  ("Reviewing tool results…") stream live, so background work never looks
+  stalled.
+- **Teams of workers.** Workers run concurrently, and each shows the task it
+  was given, its tools and its response. The main agent writes the combined
+  report itself.
+- **Diagrams over prose.** Comparisons, breakdowns and processes come back
+  as Mermaid charts rendered in the reply.
+- **Outputs.** Any answer can be exported as CSV, diagram, chart, Markdown,
+  PDF, Word, slides or JSON. The deliverables chosen in Setup are always
+  offered. A whole conversation exports to a PDF that matches the on-screen
+  view.
+- **Next moves.** Each reply ends with 2–4 suggested next steps, as buttons.
+- **Case file.** A waterfall of every span in the turn, with model, timing
+  and tokens. "How this agent was made" shows the bootstrap the same way:
+  similar past agents used for grounding, tools proposed, what the code
+  checks caught and what was fixed or dropped.
+- **Resume.** A saved conversation reopens with a "Previously…" recap
+  written by the agent in character.
 
 ---
 
-## Provider/Model Recommendation
+## How it works
 
-The Settings screen's provider/model picker stays fully manual — but it's no
-longer a blind guess. Every self-evaluation check the platform already runs
-against its own output (bootstrap validity, chat-response relevance,
-tool-call correctness, worker-delegation success — `backend/src/eval_checks.py`)
-is tagged with the provider/model that produced the thing being graded, so
-the accumulated pass/fail history (`eval_results` table in `data/agentone.db`) is attributable
-per model, not just an anonymous feed.
+```text
+┌──────────────────────────────────────────────────────────────────┐
+│ Phase 1: Bootstrap  (POST /bootstrap, streamed NDJSON)           │
+│                                                                  │
+│ purpose + spec ──► LLM generates AgentConfig                     │
+│   • system_prompt, persona                                       │
+│   • tools[]: a generated Python implementation, OR a reference   │
+│     to a real tool on a vetted MCP server (source: "mcp")        │
+│ Grounded by: similar past bootstraps (embedding retrieval)       │
+│              + the live catalog of vetted MCP tools              │
+│ Then: compile / forbidden-call / undefined-name (AST) checks,    │
+│       one retry, then drop; spec rules enforced in code          │
+└──────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│ Phase 2: Agent loop  (POST /agent, streamed NDJSON)              │
+│                                                                  │
+│ message ──► LLM with the agent's tools                           │
+│   ├─ generated tool     → sandboxed child process                │
+│   ├─ source: "mcp"      → the real MCP server                    │
+│   ├─ delegate_to_worker → bootstrap + run a worker (concurrent)  │
+│   └─ final reply        → self-checks, scope guard → UI          │
+└──────────────────────────────────────────────────────────────────┘
+```
 
-`backend/src/bandit.py` runs a UCB1 multi-armed-bandit ranking over that
-history: each `(provider, model)` pair is an "arm," scored by its observed
-pass rate plus an exploration bonus that favors under-tried arms, so a
-newly pulled Ollama model gets a fair shot instead of being permanently
-buried under an early leader. `GET /models` returns this ranking alongside
-the model list, and the Settings modal shows the top pick as a "🏆
-Data-backed pick" hint next to the manual dropdowns — advisory only, never
-auto-selected.
+The backend is stateless for conversations: the full history and
+`AgentConfig` travel with every request.
+
+A bootstrapped agent can also be **published** as an MCP tool
+(`backend/mcp_server.py`, a separate process). Any MCP client, such as
+Claude Desktop, Claude Code or another app, can then call it directly.
+Publishing is an explicit step, never automatic.
+
+---
+
+## AI features in more detail
+
+| Feature | What it does | Code |
+| --- | --- | --- |
+| Provider cascade | Gemini → Cloudflare Workers AI (hosted Qwen) → Ollama (local). The provider and model are chosen per agent in Settings. | `llm_client.py` |
+| Bootstrap grounding (RAG) | Past `purpose → config` pairs are embedded and the closest are given to the model as few-shot examples. | `bootstrap_memory.py`, `embeddings.py` |
+| Vetted MCP tools | The model can pick a real tool (time, fetch, Tavily web search) instead of writing one. | `mcp_registry.py`, `mcp_client.py` |
+| Generated-code checks | Deterministic checks catch calls to tools that don't exist, invented helper names (AST), and fake localhost proxies before the agent runs. | `bootstrap.py` |
+| Sandbox | Each generated tool call runs in a fresh `python -I` process with a scrubbed environment (no secrets), a timeout, rlimits, an import allowlist, and no network unless the code uses it. | `sandbox.py`, `sandbox_runner.py` |
+| Structured spec | Persona, tool allow-lists and limits are enforced in code; mission and scope are restated to the model every turn. | `agent_spec.py` |
+| Scope guard | A separate judge call screens replies against out-of-scope topics. It allows one regenerate, then substitutes a decline written in code. | `scope_guard.py` |
+| Self-checks | Every bootstrap, reply, tool call and delegation is graded and tagged with the provider/model that produced it. | `eval_checks.py`, `eval_log.py` |
+| Model recommendation | UCB1 bandit over that history; Settings shows a "data-backed pick". Advisory only, never auto-selected. | `bandit.py` |
+| Offline evals | Fixed cases × model arms × repeats. Chat cases replay recorded tool responses, so runs are repeatable. Results go to a scoreboard. | `eval_harness.py`, `eval_replay.py`, `eval_cases/` |
+| Run trace | Timed spans for every model call, tool and worker, streamed to the case file and logged for production timing. | `run_trace.py`, `CaseFile.tsx` |
+| Brief, outputs, Smart Focus | The Setup steps that interpret the job before anything is built. | `brief.py`, `focus_insights.py` |
+| Outputs (relics) | Builds files from an answer or from the brief. | `relic.py` |
 
 ---
 
 ## Stack
 
-| Layer    | Technology                                                      |
-|----------|------------------------------------------------------------------|
-| Frontend | React 18, TypeScript, Vite, `react-markdown` + `mermaid` for diagrammed replies |
-| Backend  | Python 3.12, Flask + gunicorn (WSGI, chat/bootstrap API), a second `uvicorn`/Starlette (ASGI) process for the MCP server |
-| AI       | Gemini (primary) → Ollama (local-only dev fallback) |
-| Tool sourcing | Gemini-generated Python (`exec()`), or real tools from vetted MCP servers via the official `mcp` SDK (stdio for the reference servers, Streamable HTTP for Tavily's remote search server) |
-| Hosting  | systemd + nginx on a droplet (`agent.carkus.com`); no container orchestration, no CI — deployed by tarball over SSH |
+| Layer | Technology |
+| --- | --- |
+| Frontend | React 18, TypeScript, Vite, React Flow (`@xyflow/react`) for the graphs, `react-markdown` + `mermaid`, `jspdf`, Leaflet |
+| Backend | Python, Flask + gunicorn (chat/bootstrap API), plus a separate uvicorn/Starlette process for the MCP server |
+| Storage | One SQLite database (`DATA_DIR/agentone.db`, WAL mode) for bootstrap memory, eval history, published agents, saved profiles and rate limits. Conversations are saved in the browser. |
+| AI | Gemini, Cloudflare Workers AI, Ollama; the official `mcp` SDK (stdio and Streamable HTTP) |
+| Hosting | systemd + nginx on a droplet (`agent.carkus.com`), shipped by tarball over SSH |
 
-An AWS SAM/Lambda path (`template.yaml`, `backend/src/handler.py`) still
-exists in the repo as **dev-only tooling** (`sam local`) — it is not what's
-deployed. Don't expect changes to `handler.py` to reach production; see
-[`AIAgent/CLAUDE.md`](./CLAUDE.md) for the full architecture rationale.
+An AWS SAM/Lambda path (`template.yaml`, `backend/src/handler.py`) is still
+in the repo as dev-only tooling (`sam local`). It is not deployed.
 
 ---
 
-## Project Structure
+## Project structure
 
-```
+```text
 AIAgentOne/
 ├── backend/
-│   ├── server.py            # Flask app — actual runtime for dev + prod: /bootstrap, /agent, /models, /agents, /file/<name>
-│   ├── mcp_server.py         # Separate uvicorn/ASGI process — exposes published agents as MCP tools over Streamable HTTP
-│   ├── src/
-│   │   ├── bootstrap.py         # Streams the bootstrap call; grounds it with few-shot examples + vetted MCP catalog
-│   │   ├── agent_stream.py      # The agentic loop that actually runs in prod (streamed tool_start/tool_result/done)
-│   │   ├── orchestrator.py      # Multi-agent scaffold — bootstraps + runs a delegated worker agent
-│   │   ├── llm_client.py        # Gemini → Ollama cascade
-│   │   ├── embeddings.py        # Embeddings for bootstrap RAG grounding (Gemini or Ollama)
-│   │   ├── bootstrap_memory.py  # File-store of past purpose → config pairs, powers few-shot retrieval
-│   │   ├── mcp_registry.py      # Directory of vetted MCP servers bootstrap can pick a real tool from (time, fetch, Tavily web search)
-│   │   ├── mcp_client.py        # Sync wrapper around the official MCP SDK — stdio or Streamable HTTP per server
-│   │   ├── agent_registry.py    # File-store of published agents — backs mcp_server.py's tool list
-│   │   ├── eval_checks.py       # Self-evaluation checks (bootstrap/chat/tool-call/delegation), tagged per provider+model
-│   │   ├── eval_log.py          # File-store of eval_checks.py results — the bandit's reward history
-│   │   ├── bandit.py            # UCB1 ranking over eval_log.py history — powers /models' recommendation
-│   │   ├── tools.py             # exec()'s Gemini-generated tool implementations; primitive tools (fetch_page, search_jobs)
-│   │   ├── rate_limit.py        # Per-IP rate limiting
-│   │   ├── handler.py, agent.py # AWS SAM/Lambda path — dev-only (sam local), not deployed
-│   └── requirements.txt
-├── frontend/
-│   ├── src/
-│   │   ├── App.tsx                    # Phase state machine: setup → bootstrapping → chat
-│   │   ├── api.ts                     # Typed fetch wrappers for /bootstrap, /agent, /agents, /models
-│   │   ├── types.ts                   # Shared TypeScript types
-│   │   └── components/
-│   │       ├── Setup.tsx              # Purpose input form + published-agent management
-│   │       ├── Chat.tsx               # Chat UI, message history, Mermaid-fence rendering
-│   │       ├── ToolActivity.tsx        # Collapsible tool-call log + per-worker result cards
-│   │       └── MermaidDiagram.tsx      # Renders a ```mermaid fence as an SVG chart
-│   ├── index.html
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── vite.config.ts
-├── deploy/
-│   ├── redeploy.sh                # One-command redeploy: tar/scp backend, npm build + ship frontend, restart services
-│   ├── aiagent.service            # systemd unit — gunicorn (Flask, WSGI)
-│   ├── aiagent-mcp.service        # systemd unit — uvicorn (MCP server, ASGI)
-│   └── nginx-aiagent.conf
-├── template.yaml            # AWS SAM template — dev-only (sam local), not deployed
-└── .env.example
+│   ├── server.py              # Flask app (dev + prod): /bootstrap, /agent, /brief*, /relic, /recap, /models, /agents, …
+│   ├── mcp_server.py          # Separate ASGI process: published agents as MCP tools
+│   ├── eval_harness.py        # Offline eval runner (--suite bootstrap | chat)
+│   ├── eval_replay.py         # Tool-response tape for repeatable chat evals
+│   ├── eval_cases/            # Eval cases and frozen chat fixtures
+│   └── src/
+│       ├── bootstrap.py       # Streams the bootstrap; grounding, validators, retry/drop
+│       ├── agent_stream.py    # The agent loop: tools, delegation, self-checks, scope guard
+│       ├── orchestrator.py    # Bootstraps and runs a delegated worker
+│       ├── llm_client.py      # Gemini → Workers AI → Ollama cascade
+│       ├── agent_spec.py      # Advanced Setup's spec: prompt block, post-gen enforcement, runtime gates
+│       ├── scope_guard.py     # Out-of-scope output judge
+│       ├── sandbox.py         # Per-call process isolation for generated tools
+│       ├── sandbox_runner.py  # The sandboxed child process
+│       ├── tools.py           # Primitive tools (fetch_page, search_jobs, images, save_output)
+│       ├── brief.py           # Setup's brief, brief graph and proposed outputs
+│       ├── focus_insights.py  # Smart Focus (embedding similarity)
+│       ├── relic.py           # Output files: CSV, chart, PDF, DOCX, slides, …
+│       ├── recap.py           # "Previously…" recap for a resumed chat
+│       ├── run_trace.py       # Timed spans for the case file
+│       ├── eval_checks.py, eval_log.py, bandit.py, agent_stats.py
+│       ├── bootstrap_memory.py, embeddings.py
+│       ├── mcp_registry.py, mcp_client.py, agent_registry.py
+│       ├── agent_drafts.py, saved_searches.py
+│       ├── db.py              # Shared SQLite database
+│       ├── rate_limit.py      # Per-IP limits, shared across workers via SQLite
+│       └── handler.py, agent.py  # SAM/Lambda path, dev-only
+├── frontend/src/
+│   ├── App.tsx                # Phases: setup → bootstrapping → chat
+│   ├── api.ts, types.ts
+│   └── components/
+│       ├── Setup.tsx, ProcessGraph.tsx, BriefGraph.tsx, ColumnGraph.tsx
+│       ├── AdvancedSetup.tsx, AgentPool.tsx (Load Agent), SettingsModal.tsx
+│       ├── Chat.tsx, ToolActivity.tsx, GraphView.tsx, CaseFile.tsx
+│       ├── AgentMakingReport.tsx, ScoreboardModal.tsx, MermaidDiagram.tsx
+│       └── …
+├── deploy/                    # redeploy.sh, systemd units, nginx config
+├── CLAUDE.md                  # Full architecture notes and design decisions
+├── RUN.md                     # Local setup, step by step
+└── DEPLOY.md                  # Droplet setup
 ```
 
 ---
 
-## Prerequisites
+## Running locally
 
-- Python 3.12+
-- Node.js 18+
-- A Gemini API key (production and default dev path)
-- [Ollama](https://ollama.com/) — optional, for a fully local/offline dev fallback (no cloud calls)
-- AWS SAM CLI — optional, only if you want to exercise the dev-only Lambda path via `sam local`
-
----
-
-## Local Development
-
-No SAM or Docker needed day-to-day. Full first-time setup: [`RUN.md`](./RUN.md).
+Full first-time setup is in [`RUN.md`](./RUN.md). Short version:
 
 ```bash
-# Backend — from the repo root (reads credentials from env.json / .env)
-python backend/server.py
+# Backend, from the repo root (reads credentials from env.json / .env)
+python backend/server.py          # http://localhost:4891
 
-# Frontend — in a second terminal
-cd frontend
-npm install
-npm run dev
+# Frontend, in a second terminal
+cd frontend && npm install && npm run dev   # http://localhost:5273
+
+# Optional: the MCP server, in a third terminal
+python backend/mcp_server.py      # http://localhost:4892/mcp
 ```
 
-`server.py` listens on `localhost:3000`; the Vite dev server on
-`localhost:5173` proxies `/bootstrap`, `/agent`, `/agents`, `/models` to it.
-To also exercise the MCP-server side (publishing an agent and calling it
-from an MCP client), run `python backend/mcp_server.py` in a third terminal
-(default port `4892`).
+The Vite dev server proxies the API routes to `localhost:4891`.
 
-`sam local start-api` still works as an alternative that exercises
-`handler.py`/the Lambda code path instead, but it isn't the day-to-day flow.
+**Prerequisites:** Python 3.12+, Node.js 18+, and at least one model
+provider: a Gemini API key, a Cloudflare Workers AI account, or
+[Ollama](https://ollama.com/) running locally. With Ollama, set
+`OLLAMA_CONTEXT_LENGTH=16384` on the Ollama server; Ollama ignores the API's
+context setting, and prompts are otherwise cut to about 2k tokens.
 
 ---
 
 ## Deployment
 
-Production is a **systemd + nginx droplet** (`agent.carkus.com`), not AWS —
-see [`DEPLOY.md`](./DEPLOY.md) for full first-time setup and rationale.
-There is no git or CI on the droplet; code ships as a tarball over SSH.
+Production is a systemd + nginx droplet, not AWS. See
+[`DEPLOY.md`](./DEPLOY.md).
 
 ```bash
-deploy/redeploy.sh backend    # sync backend/src + requirements, restart aiagent + aiagent-mcp
-deploy/redeploy.sh frontend   # npm run build locally, ship dist/, fix ownership
-deploy/redeploy.sh all        # both
+deploy/redeploy.sh backend    # sync backend, restart aiagent + aiagent-mcp
+deploy/redeploy.sh frontend   # build locally, ship dist/
+deploy/redeploy.sh all
 ```
 
-Run from the repo root; requires SSH access to the droplet.
-
-- `gunicorn server:app` runs the chat/bootstrap API under the `aiagent` systemd unit — 1 worker process × 16 threads (all state, including rate-limit counters, is in the shared SQLite database `data/agentone.db`, so more workers are safe if the box grows)
-- `uvicorn mcp_server:app` runs the MCP server under its own `aiagent-mcp` systemd unit — a structurally separate ASGI process, since the MCP SDK's HTTP transports are Starlette-only and can't share the Flask/gunicorn app
-- nginx serves the built frontend and reverse-proxies API routes to gunicorn and `/mcp` to uvicorn; one shared HTTP Basic Auth login gates the whole app
-- Production is Gemini-only — no Ollama fallback in prod
-
----
-
-## Environment Variables
-
-| Variable          | Where            | Description                                          |
-|--------------------|------------------|-------------------------------------------------------|
-| `GEMINI_API_KEY`   | Backend env      | Gemini API key — primary provider for bootstrap, chat, and embeddings |
-| `OLLAMA_MODEL`     | Backend env (dev) | Local Ollama model name, used only when running `server.py` locally with a local-only agent |
-| `TAVILY_API_KEY`   | Backend env      | Enables the vetted `search` MCP server (Tavily's official remote server) for general web search — omitted entirely from the bootstrap catalog when unset, so nothing else needs to be toggled once it's added |
-| `MCP_API_KEY`      | Backend env (prod) | Per-consumer API key gating `/mcp` independently of the site's shared login |
-| `MCP_PORT`         | Backend env (dev) | Port for `mcp_server.py`'s dev server (default `4892`) |
-| `VITE_API_URL`     | Frontend build   | Base URL of the deployed API (defaults to `http://localhost:3000` if unset) |
-
-See `.env.example` for the full list, including the dev-only Lambda/SAM variables.
+- `gunicorn server:app`: 1 worker × 16 threads (`aiagent` unit)
+- `uvicorn mcp_server:app`: its own `aiagent-mcp` unit, proxied at `/mcp`
+- nginx serves the frontend and proxies both; one HTTP Basic Auth login
+  gates the whole app
+- No Ollama in production; chat uses Gemini and Workers AI
 
 ---
 
-## Current Limitations and Proposed Solutions
+## Environment variables
 
-### 1. Tool execution security (`exec()` in-process)
+| Variable | Purpose |
+| --- | --- |
+| `GEMINI_API_KEY` | Gemini for chat, bootstrap, embeddings and images |
+| `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN` | Workers AI (hosted Qwen) in the chat cascade; also an image fallback |
+| `OLLAMA_BASE_URL`, `OLLAMA_MODEL` | Local Ollama (dev) |
+| `DISABLE_OLLAMA` | `1` removes Ollama from the cascade and the model list |
+| `LLM_PROVIDER` | Force one provider, e.g. `ollama` |
+| `TAVILY_API_KEY` | Enables the vetted Tavily web-search MCP server |
+| `HF_API_TOKEN` | Hugging Face image-generation fallback |
+| `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` | `search_jobs` primitive (job-search agent type) |
+| `MCP_API_KEY` | API key for `/mcp`, independent of the site login |
+| `MCP_PORT`, `PORT` | Dev ports (defaults 4892, 4891) |
+| `RATE_LIMIT_PER_MINUTE`, `RATE_LIMIT_PER_DAY` | Per-IP limits on paid-provider calls (Ollama exempt) |
+| `TOOL_SANDBOX_TIMEOUT_SECONDS`, `TOOL_SANDBOX_MEMORY_MB`, `TOOL_SANDBOX_CPU_SECONDS` | Sandbox limits |
+| `DATA_DIR` | Where `agentone.db` lives |
 
-**Problem:** Gemini-generated code runs in-process (the `aiagent` gunicorn worker in prod, or locally under `server.py`). A builtins allowlist is in place but is not a full sandbox.
-
-**Proposed solutions:**
-- Process isolation per tool call.
-- [RestrictedPython](https://github.com/zopefoundation/RestrictedPython) — compiles Python to a restricted AST, blocking dangerous constructs before execution.
-- Prefer routing more tool categories through vetted MCP servers (`mcp_registry.py`) instead of generated code — already done for the categories a vetted server exists for; growing that directory removes the exec() risk entirely for the tools it covers.
-
----
-
-### 2. No server-side conversation persistence
-
-**Problem:** Chat history lives in React state; a "Save chat" button persists it to the browser's `localStorage`, but nothing is stored server-side — saved chats don't follow the user across browsers/devices.
-
-**Proposed solution:** a session table server-side, if cross-device continuity becomes a real need.
-
----
-
-### 3. Authentication is perimeter-only
-
-**Problem:** Production sits behind one shared nginx HTTP Basic Auth login (frontend and API alike) rather than per-user accounts; anyone with that login can use the whole app. Fine for a single-operator/demo deployment, not for multi-user access control.
-
-**Proposed solutions:**
-- Per-user accounts with a real session/token scheme.
-- Scope the `/mcp` endpoint's existing per-consumer `MCP_API_KEY` model out to the rest of the API too.
+See `.env.example` for a starting point.
 
 ---
 
-### 4. File output is ephemeral
+## Current limitations
 
-**Problem:** The `save_output` tool writes to the backend process's `/tmp/`, served back via `GET /file/<name>` — lost on restart/redeploy, and shared across all users of the one shared login rather than scoped per session.
+1. **Sandbox is a process, not a container.** Generated code runs in a
+   child process with no secrets, a timeout and (on Linux) rlimits and no
+   network unless declared. Code that escapes the Python-level layer can
+   still read files the service user can read, and a network tool can reach
+   any host. Next step: a separate low-privilege user or container per call,
+   and an egress allowlist.
+2. **Conversations are saved in the browser only.** Saved chats live in
+   `localStorage` and don't follow you across devices. Agent profiles and
+   published agents are stored server-side.
+3. **Authentication is perimeter-only.** One shared login gates the
+   deployed app; there are no per-user accounts.
+4. **File output is ephemeral.** `save_output` files are written to the
+   server's temp directory and are lost on restart.
+5. **Out-of-scope is judged, not guaranteed.** Persona, tool lists and
+   limits are enforced in code. Meaning-level rules (mission, out-of-scope)
+   are asked of the model and screened by a judge that fails open, so they
+   can still be missed.
 
-**Proposed solution:** write to S3 (or equivalent) and return a pre-signed URL.
-
----
-
-### 5. Bootstrap quality is input-dependent
-
-**Problem:** Vague purpose descriptions still produce generic tools, especially on the first bootstrap of a given kind of purpose (before any few-shot grounding exists for it).
-
-**Already addressed, partially:**
-- The Setup screen's Agent Type preset dropdown narrows freeform input into a purpose-built prompt template per type.
-- Bootstrap RAG grounding (`bootstrap_memory.py`/`embeddings.py`) feeds the model 1-2 similar past `purpose → config` pairs as few-shot examples once enough bootstraps have accumulated for that kind of purpose.
-
-**Still open:** a structured review/regenerate step before launching chat, and cold-start quality for a genuinely novel kind of purpose.
-
----
-
-### 6. AgentConfig persistence is split, not unified
-
-**Problem:** A saved chat's `AgentConfig` round-trips through browser `localStorage` (see limitation 2) for "reload this browser's chat"; separately, an explicit **publish** step (`agent_registry.py`) persists a chosen `AgentConfig` server-side so it can be exposed as an MCP tool. These are two different persistence paths for two different purposes, not one general store.
-
-**Proposed solution:** if a unified server-side store becomes worth the complexity, it would subsume both — but the current split is deliberate (publish is a human-in-the-loop step, not automatic for every bootstrap), not an oversight to fix by default.
-
----
-
-For the fuller architecture picture — including the Gemini/Ollama provider cascade, the multi-agent delegation scaffold, and the MCP client/server design — see [`AIAgent/CLAUDE.md`](./CLAUDE.md).
+For the full architecture and the reasoning behind each decision, see
+[`CLAUDE.md`](./CLAUDE.md).
