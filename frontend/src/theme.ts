@@ -25,7 +25,7 @@ export const THEME_TOKENS: ThemeToken[] = [
   { key: 'border', cssVar: '--color-border', label: 'Borders', default: '#ddd9cd' },
   { key: 'accent', cssVar: '--color-accent', label: 'Buttons and Focus', default: '#014792' },
   { key: 'accentSecondary', cssVar: '--color-accent-secondary', label: 'Secondary accent', default: '#3f7ea0' },
-  { key: 'dossier', cssVar: '--color-dossier', label: 'Dossier panel', default: '#ede4cd' },
+  { key: 'dossier', cssVar: '--color-dossier', label: 'Dossier panel', default: '#f3ecdb' },
 ]
 
 export type ThemeOverrides = Partial<Record<string, string>>
@@ -157,7 +157,7 @@ export function applyTheme(overrides: ThemeOverrides): void {
   // hardcoded copy of the same handful of tan/brown hex values; all of them
   // now shift together relative to this one base swatch.
   const dossier = get('dossier')
-  const DOSSIER_DEFAULT = '#ede4cd'
+  const DOSSIER_DEFAULT = '#f3ecdb'
   const deriveDossier = (defaultTarget: string) => deriveRelative(dossier, DOSSIER_DEFAULT, defaultTarget)
   const dossierText = deriveDossier('#6b5a32')
   root.setProperty('--color-dossier-border', deriveDossier('#cfbf94'))

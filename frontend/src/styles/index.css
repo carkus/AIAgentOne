@@ -53,7 +53,7 @@
      AgentStableModal and FeedbackReportModal's modal chrome, plus Setup's own
      saved-searches folder (the "-setup-" variants below). All derived from
      --color-dossier by theme.ts's deriveRelative() when the picker changes. */
-  --color-dossier: #ede4cd;
+  --color-dossier: #f3ecdb;
   --color-dossier-border: #cfbf94;
   --color-dossier-text: #6b5a32;
   --color-dossier-muted: #8a7a52;

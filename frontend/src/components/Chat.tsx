@@ -381,7 +381,6 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
   const [relicBusy, setRelicBusy] = useState<string | null>(null)
   const [relicError, setRelicError] = useState<{ key: string; message: string } | null>(null)
   const [relicPreview, setRelicPreview] = useState<{ index: number; kind: RelicKind } | null>(null)
-  const [exportMenuFor, setExportMenuFor] = useState<number | null>(null)
   const [pdfPreview, setPdfPreview] = useState<{ blobUrl: string; filename: string; doc: Awaited<ReturnType<typeof buildChatPdf>> } | null>(null)
   // Rendered markdown DOM per assistant message index, so PDF export can
   // walk react-markdown's actual output (link hrefs, list/heading structure)
@@ -576,40 +575,32 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
       !!(msg.relicSuggestions || msg.relics || msg.content.length >= 200)
   }
 
-  // "Export as…" sits inside the Tool activity box, after the worker
-  // reports, whenever that box is showing; otherwise in the relic row.
-  function exportInToolActivity(msg: ChatMessage, i: number) {
-    return offersRelics(msg) && !!msg.toolCalls?.length && !!logViewMessages.has(i)
-  }
-
+  // One button per format: 📎 already built (opens its preview), ✨ the
+  // agent suggested it (its reason as the tooltip), ⬇ otherwise.
   function exportControls(msg: ChatMessage, i: number) {
     const isBuilt = (kind: RelicKind) => (msg.relics ?? []).some(r => r.kind === kind)
+    const suggestion = (kind: RelicKind) => msg.relicSuggestions?.find(s => s.kind === kind)
     return (
-      <div>
-        <button
-          type="button"
-          className={styles.exportAsBtn}
-          disabled={relicBusy !== null}
-          onClick={() => setExportMenuFor(exportMenuFor === i ? null : i)}
-        >
-          {exportMenuFor === i ? '✕ Close export' : '⬇ Export as…'}
-        </button>
-        {exportMenuFor === i && (
-          <div>
-            {RELIC_KINDS.map(kind => (
-              <button
-                key={`export-${kind}`}
-                type="button"
-                className={styles.viewToggleBtn}
-                disabled={relicBusy !== null}
-                onClick={() => handleBuildRelic(i, kind)}
-              >
-                {isBuilt(kind) ? '📎' : '⬇'} {RELIC_LABELS[kind]}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      <>
+        {RELIC_KINDS.map(kind => {
+          const built = isBuilt(kind)
+          const suggested = suggestion(kind)
+          return (
+            <button
+              key={`export-${kind}`}
+              type="button"
+              className={styles.viewToggleBtn}
+              title={built ? 'Preview and download' : suggested?.reason}
+              disabled={!built && relicBusy !== null}
+              onClick={() => built
+                ? setRelicPreview({ index: i, kind })
+                : handleBuildRelic(i, kind, suggested?.reason ?? '')}
+            >
+              {built ? '📎' : suggested ? '✨' : '⬇'} {RELIC_LABELS[kind]}
+            </button>
+          )
+        })}
+      </>
     )
   }
 
@@ -681,7 +672,6 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
   async function handleBuildRelic(index: number, kind: RelicKind, reason = '', regenerate = false) {
     const key = `${index}-${kind}`
     const msg = messages[index]
-    setExportMenuFor(null)
     if (!regenerate && msg.relics?.some(r => r.kind === kind)) {
       setRelicPreview({ index, kind })
       return
@@ -1364,7 +1354,6 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
                     toolCalls={msg.toolCalls}
                     live={false}
                     location={usedLocation}
-                    afterWorkers={exportInToolActivity(msg, i) ? exportControls(msg, i) : null}
                   />
                 )}
               </>
@@ -1479,56 +1468,37 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
                 ))}
               </div>
             )}
-            {msg.role === 'assistant' && msg.trace && msg.trace.length > 0 && (
-              <>
-                <button
-                  type="button"
-                  className={styles.viewToggleBtn}
-                  onClick={() => toggleCaseFile(i)}
-                >
-                  {caseFileMessages.has(i) ? '🗂️ Hide case file' : '🗂️ Case file'}
-                </button>
-                {caseFileMessages.has(i) && (
-                  <CaseFile spans={msg.trace} live={msg.durationSeconds === undefined} />
-                )}
-              </>
-            )}
-            {msg.role === 'assistant' && msg.durationSeconds !== undefined && (msg.relicSuggestions || msg.relics || msg.content.length >= 200) && (() => {
-              const built = msg.relics ?? []
-              const isBuilt = (kind: RelicKind) => built.some(r => r.kind === kind)
-              const suggested = (msg.relicSuggestions ?? []).filter(s => !isBuilt(s.kind))
+            {msg.role === 'assistant' && (() => {
+              const hasTrace = !!msg.trace && msg.trace.length > 0
+              const hasExports = offersRelics(msg)
+              if (!hasTrace && !hasExports) return null
               const busyKind = relicBusy?.startsWith(`${i}-`) ? relicBusy.slice(`${i}-`.length) as RelicKind : null
               return (
-                <div>
-                  {built.map(r => (
-                    <button
-                      key={`built-${r.kind}`}
-                      type="button"
-                      className={styles.viewToggleBtn}
-                      title="Preview and download"
-                      onClick={() => setRelicPreview({ index: i, kind: r.kind })}
-                    >
-                      📎 {RELIC_LABELS[r.kind]}
-                    </button>
-                  ))}
-                  {suggested.map(s => (
-                    <button
-                      key={`suggested-${s.kind}`}
-                      type="button"
-                      className={styles.viewToggleBtn}
-                      title={s.reason}
-                      disabled={relicBusy !== null}
-                      onClick={() => handleBuildRelic(i, s.kind, s.reason)}
-                    >
-                      ✨ {RELIC_LABELS[s.kind]}
-                    </button>
-                  ))}
-                  {!exportInToolActivity(msg, i) && exportControls(msg, i)}
+                <>
+                  {/* The answer's tool area: case file | export formats. */}
+                  <div className={styles.toolPanel}>
+                    {hasTrace && (
+                      <div className={styles.toolPanelColumn}>
+                        <button
+                          type="button"
+                          className={styles.viewToggleBtn}
+                          onClick={() => toggleCaseFile(i)}
+                        >
+                          {caseFileMessages.has(i) ? '🗂️ Hide case file' : '🗂️ Case file'}
+                        </button>
+                      </div>
+                    )}
+                    {hasTrace && hasExports && <span className={styles.toolPanelDivider} aria-hidden="true" />}
+                    {hasExports && <div className={styles.toolPanelExports}>{exportControls(msg, i)}</div>}
+                  </div>
+                  {hasTrace && caseFileMessages.has(i) && (
+                    <CaseFile spans={msg.trace!} live={msg.durationSeconds === undefined} />
+                  )}
                   {busyKind && <p className={styles.duration}>Building {RELIC_LABELS[busyKind]}…</p>}
                   {relicError && relicError.key.startsWith(`${i}-`) && !relicPreview && (
                     <p className={styles.duration}>{relicError.message}</p>
                   )}
-                </div>
+                </>
               )
             })()}
             {msg.durationSeconds !== undefined && (
