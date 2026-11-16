@@ -2069,7 +2069,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                 return (
                   <div className={styles.briefNoteBox} role="note">
                     <p className={styles.briefNoteText}>
-                      <span className={styles.briefNoteIcon} aria-hidden="true">ℹ</span>{' '}
+                      <span className={styles.briefNoteIcon} aria-hidden="true">i</span>{' '}
                       {keywords.length === limit
                         ? `That's ${limit} focus topics, the most the agent covers with a worker each per turn. Adding more works, but some topics will share a worker.`
                         : `Up to ${limit} focus topics each get their own worker agent per turn (Settings). Fewer, sharper topics give a more focused brief.`}
@@ -2217,7 +2217,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                   </div>
                   {briefWarning && (
                     <div className={styles.briefNoteBox} role="note">
-                      <p className={styles.briefNoteText}><span className={styles.briefNoteIcon} aria-hidden="true">ℹ</span> {briefWarning}</p>
+                      <p className={styles.briefNoteText}><span className={styles.briefNoteIcon} aria-hidden="true">i</span> {briefWarning}</p>
                     </div>
                   )}
                 </>
@@ -2267,7 +2267,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                   </div>
                   {briefWarning && (
                     <div className={styles.briefNoteBox} role="note">
-                      <p className={styles.briefNoteText}><span className={styles.briefNoteIcon} aria-hidden="true">ℹ</span> {briefWarning}</p>
+                      <p className={styles.briefNoteText}><span className={styles.briefNoteIcon} aria-hidden="true">i</span> {briefWarning}</p>
                     </div>
                   )}
                   {briefRelicError && !briefRelicPreview && (

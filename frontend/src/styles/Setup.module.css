@@ -1359,8 +1359,19 @@
 }
 
 .briefNoteIcon {
-  color: #3f7ea0;
-  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 999px;
+  background: #3f7ea0;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-style: normal;
+  line-height: 1;
+  vertical-align: text-bottom;
 }
 
 .specialInstructionsRow {
