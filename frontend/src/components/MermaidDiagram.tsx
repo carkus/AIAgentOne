@@ -58,7 +58,7 @@ function ensureInitialized() {
       edgeLabelBackground: '#ffffff',
       textColor: ink,
       nodeTextColor: ink,
-      fontSize: '14px',
+      fontSize: '12px',
       fontFamily,
       ...pies,
       pieOpacity: '1',
@@ -320,6 +320,8 @@ export default function MermaidDiagram({ chart, label, caption }: Props) {
         label="Diagram"
         onExpand={() => setViewerOpen(true)}
         zoomButtons={false}
+        maxHeightVh={0.35}
+        maxFitScale={1}
       >
         <div dangerouslySetInnerHTML={{ __html: svg ?? '' }} />
       </GraphFrame>

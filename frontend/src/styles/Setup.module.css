@@ -744,7 +744,7 @@
   align-items: center;
   gap: 0.3rem;
   padding: 0.2rem;
-  background: #d9eaf2;
+  background: #edf5f9;
   border: 1px solid #b4d2df;
   border-radius: var(--radius-control);
 }
@@ -762,7 +762,7 @@
 .topTools {
   gap: 0.3rem;
   padding: 0.2rem;
-  background: #d9eaf2;
+  background: #edf5f9;
   border: 1px solid #b4d2df;
   border-radius: var(--radius-control);
 }
@@ -2755,7 +2755,7 @@
   .toolbarIconBtn.toolbarToolsBtn {
     display: inline-flex;
     margin-left: 0.6rem;
-    background: #d9eaf2;
+    background: #edf5f9;
     border-color: #b4d2df;
   }
 

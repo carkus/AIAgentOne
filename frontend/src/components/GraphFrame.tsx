@@ -42,6 +42,11 @@ interface Props {
   controls?: boolean
   // False hides just +/−/fit and the scale, keeping ⛶ when onExpand is set.
   zoomButtons?: boolean
+  // Own-zoom mode's height cap, as a fraction of the window height.
+  maxHeightVh?: number
+  // Own-zoom mode: the most fitting may enlarge the content (1 = never
+  // past its natural size, so its text stays at the size it was drawn).
+  maxFitScale?: number
 }
 
 const MIN_SCALE = 0.1
@@ -57,7 +62,7 @@ const CONTROLS_GAP = 8
 // cover the bottom of the graph.
 const SCROLLBAR_ALLOWANCE = 14
 
-export default function GraphFrame({ children, zoom, onExpand, className, contentClassName, label = 'Graph', height: externalHeight, scrollX, contentWidth, scrollRef, controls = true, zoomButtons = true }: Props) {
+export default function GraphFrame({ children, zoom, onExpand, className, contentClassName, label = 'Graph', height: externalHeight, scrollX, contentWidth, scrollRef, controls = true, zoomButtons = true, maxHeightVh = 0.85, maxFitScale = MAX_SCALE }: Props) {
   const frameRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const controlsRef = useRef<HTMLDivElement>(null)
@@ -85,12 +90,12 @@ export default function GraphFrame({ children, zoom, onExpand, className, conten
     // Fit to the width, capped at 85vh tall (same cap as the CSS), and make
     // the frame exactly that tall so a wide diagram doesn't sit in a square
     // of empty space.
-    const maxH = window.innerHeight * 0.85
-    const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.min((aw - 2 * FIT_PAD) / cw, (maxH - 2 * FIT_PAD) / ch)))
+    const maxH = window.innerHeight * maxHeightVh
+    const scale = Math.min(maxFitScale, Math.max(MIN_SCALE, Math.min((aw - 2 * FIT_PAD) / cw, (maxH - 2 * FIT_PAD) / ch)))
     const fh = Math.min(maxH, ch * scale + 2 * FIT_PAD)
     setHeight(fh)
     setView({ scale, x: (aw - cw * scale) / 2, y: (fh - ch * scale) / 2 })
-  }, [])
+  }, [maxHeightVh, maxFitScale])
 
   const zoomBy = useCallback((factor: number) => {
     const frame = frameRef.current

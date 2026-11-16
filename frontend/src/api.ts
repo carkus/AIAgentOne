@@ -185,7 +185,7 @@ export async function fetchAgentBrief(
   return res.json();
 }
 
-export type BriefStageId = 'read' | 'focus' | 'character' | 'plan';
+export type BriefStageId = 'search' | 'read' | 'focus' | 'character' | 'plan';
 export type BriefPartId = 'focus' | 'character' | 'plan';
 
 export type BriefStreamEvent =

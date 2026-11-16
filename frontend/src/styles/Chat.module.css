@@ -750,9 +750,18 @@
    overlay below hangs off it. */
 .mermaidDiagram {
   position: relative;
+  /* Shorter than GraphFrame's 85vh default (MermaidDiagram's maxHeightVh). */
+  max-height: 35vh;
   /* Drag pans the diagram; selecting its labels just got in the way. */
   user-select: none;
   -webkit-user-select: none;
+}
+
+/* White box behind the diagram, matching the svg's own white, now that a
+   small diagram no longer fills the frame. Doubled class to win over
+   GraphFrame's .frame background whatever order the CSS loads in. */
+.mermaidDiagram.mermaidDiagram {
+  background: #ffffff;
 }
 
 /* The svg is drawn at its own natural size (MermaidDiagram's
@@ -771,7 +780,6 @@
    display than a smooth modern picture. Purely a feed-content effect —
    deliberately not applied to the brand logo or the full-size ImageViewer
    zoom (inspecting a diagram closely should still show it clearly). */
-.mermaidDiagram::after,
 .messageImageBtn::after {
   content: '';
   position: absolute;
@@ -780,6 +788,20 @@
   background-image: radial-gradient(circle, rgba(22, 50, 74, 0.65) 0.6px, transparent 0.65px);
   background-size: 3px 3px;
   mix-blend-mode: multiply;
+  opacity: 0.5;
+  border-radius: inherit;
+}
+
+/* Diagrams get the same dot screen as a backdrop instead: ::before is
+   painted ahead of the frame's content, so the graph sits on top of the
+   dots and its white boxes stay clean. */
+.mermaidDiagram::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(circle, rgba(22, 50, 74, 0.65) 0.6px, transparent 0.65px);
+  background-size: 3px 3px;
   opacity: 0.5;
   border-radius: inherit;
 }

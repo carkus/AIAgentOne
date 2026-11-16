@@ -234,7 +234,9 @@ const SETUP_STEPS: { id: SetupStepId; label: string; help: string }[] = [
 ]
 
 // The streamed brief's stages (brief.py's generate_brief_stream), in the
-// order shown while it drafts. The first three run at the same time.
+// order shown while it drafts. The web search runs alongside "character";
+// "read" and "focus" start once it's back. "search" only shows once the
+// server reports it (no Tavily key, no search).
 type BriefStageState = 'pending' | 'active' | 'done' | 'failed'
 interface BriefProgress {
   stages: Record<BriefStageId, BriefStageState>
@@ -243,17 +245,20 @@ interface BriefProgress {
   fallback: boolean
 }
 const EMPTY_BRIEF_PROGRESS: BriefProgress = {
-  stages: { read: 'pending', focus: 'pending', character: 'pending', plan: 'pending' },
+  stages: { search: 'pending', read: 'pending', focus: 'pending', character: 'pending', plan: 'pending' },
   parts: {},
   fallback: false,
 }
 const BRIEF_STAGES: { id: BriefStageId; label: string }[] = [
+  { id: 'search', label: 'Searching the web' },
   { id: 'read', label: 'Reading the case' },
   { id: 'focus', label: 'The focuses' },
   { id: 'character', label: 'Its character' },
   { id: 'plan', label: 'The plan and graph' },
 ]
 const BRIEF_PARTS: BriefPartId[] = ['focus', 'character', 'plan']
+const shownBriefStages = (p: BriefProgress) =>
+  BRIEF_STAGES.filter(s => s.id !== 'search' || p.stages.search !== 'pending')
 
 // Step navigation for the setup card: a breadcrumb of the step names, each
 // one clickable. Steps aren't gated, so the user can jump straight to any
@@ -1017,7 +1022,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
         ? { icon: '📝', title: 'Brief', state: 'active', detail: briefProgress
             ? briefProgress.fallback
               ? 'Writing the brief in one go…'
-              : `Drafting the brief: ${BRIEF_STAGES.filter(s => briefProgress.stages[s.id] === 'done').length} of ${BRIEF_STAGES.length} parts done`
+              : `Drafting the brief: ${shownBriefStages(briefProgress).filter(s => briefProgress.stages[s.id] === 'done').length} of ${shownBriefStages(briefProgress).length} parts done`
             : 'Drafting the brief…' }
         : aiBrief?.type === 'question'
           ? { icon: '📝', title: 'Brief', state: 'active', detail: `Asking you: ${aiBrief.text}` }
@@ -1687,7 +1692,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
           <span className={styles.briefStageMark} aria-hidden="true"><span className={styles.briefUpdatingSpinner} /></span>
           Writing the brief in one go
         </li>
-      ) : BRIEF_STAGES.map(s => {
+      ) : shownBriefStages(briefProgress).map(s => {
         const state = briefProgress.stages[s.id]
         return (
           <li key={s.id} className={styles.briefStage} data-state={state}>
