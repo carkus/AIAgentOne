@@ -3,6 +3,7 @@ import Setup from './components/Setup'
 import AdvancedSetup from './components/AdvancedSetup'
 import Chat from './components/Chat'
 import SplashScreen from './components/SplashScreen'
+import MobileNotice from './components/MobileNotice'
 import type { AgentConfig, SavedChat } from './types'
 import { SURNAMES } from './surnames'
 import { getLastOpenedPointer, loadSavedChats, setLastOpenedPointer } from './chatStorage'
@@ -174,6 +175,7 @@ export default function App() {
           chatId={resumedChat?.id}
         />
       ) : null}
+      <MobileNotice />
     </div>
   )
 }
