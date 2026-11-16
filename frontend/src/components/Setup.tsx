@@ -8,6 +8,7 @@ import { storedOllamaModel, storedCloudflareModel, describeModel, describeModelF
 import { buildAgentBrief, joinNatural } from '../agentBrief'
 import { formatDate, getDateFormat, type DateFormatId } from '../dateFormat'
 import styles from '../styles/Setup.module.css'
+import ah from '../styles/AgentHeader.module.css'
 import splashLogo from '../assets/favicon.png'
 import BriefGraph from './BriefGraph'
 import ProcessGraph, { applyDeployEvent, deployColumns, EMPTY_DEPLOY_RUN, type DeployRun, type ProcessNodeData } from './ProcessGraph'
@@ -1657,29 +1658,29 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
         <div className={styles.agentCard}>
           <div className={styles.agentCardFields}>
           <div className={styles.agentCardFieldsContent}>
-          <div className={styles.agentCardMain}>
-            {/* The agent's header (agentCardMain): the name on the left,
-                the model under it. */}
-            <div className={styles.agentNameBlock}>
-              <h1 className={styles.title}>Agent {agentName}</h1>
-              <button
-                type="button"
-                className={styles.modelLiner}
-                onClick={ev => { ev.stopPropagation(); setSettingsOpen(true) }}
-                title={describeModelFallback(provider)}
-              >
-                <span className={styles.modelLinerIcon} aria-hidden="true">🧠</span>
-                <span>{describeModel(provider, activeModel)}</span>
-              </button>
-            </div>
-            {/* The right of the header, in its own panel: Select agent (the
-                pool of previous agents), Save, Open agent, Advanced, then
-                the location. Save is always shown (never hide it). */}
-            <div className={styles.agentBar}>
-              <div className={styles.agentControls} role="group" aria-label="Agent controls">
+          <div className={`${ah.header} ${styles.agentCardMain}`}>
+            {/* The agent's header, shared with Chat (AgentHeader.module.css):
+                row 1 is the name and model, row 2 the action strip (agent
+                controls left, location right). Save is always shown. */}
+            <div className={ah.identity}>
+              <h1 className={ah.name}>Agent {agentName}</h1>
+              <div className={ah.meta}>
                 <button
                   type="button"
-                  className={`${styles.agentSelectBtn} ${poolOpen ? styles.agentControlOpen : ''}`}
+                  className={ah.metaItem}
+                  onClick={ev => { ev.stopPropagation(); setSettingsOpen(true) }}
+                  title={describeModelFallback(provider)}
+                >
+                  <span aria-hidden="true">🧠</span>
+                  <span>{describeModel(provider, activeModel)}</span>
+                </button>
+              </div>
+            </div>
+            <div className={ah.actions}>
+              <div className={ah.group} role="group" aria-label="Agent controls">
+                <button
+                  type="button"
+                  className={`${ah.btn} ${ah.btnText} ${poolOpen ? ah.btnOpen : ''}`}
                   onClick={ev => { ev.stopPropagation(); setPoolOpen(o => !o) }}
                   disabled={bootstrapping}
                   aria-expanded={poolOpen}
@@ -1688,11 +1689,11 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                   aria-label={`Load a previous agent (${drafts.length + visibleChats.length} saved)`}
                 >
                   <AgentPoolIcon />
-                  <span>Select agent</span>
+                  <span>Load Agent</span>
                 </button>
                 <button
                   type="button"
-                  className={`${styles.toolbarIconBtn} ${styles.toolbarControlBtn}`}
+                  className={ah.btn}
                   onClick={saveAgentDraft}
                   disabled={bootstrapping}
                   title="Save Agent profile — name, type, location and focus areas"
@@ -1702,7 +1703,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                 </button>
                 <button
                   type="button"
-                  className={`${styles.toolbarIconBtn} ${styles.toolbarControlBtn}`}
+                  className={ah.btn}
                   onClick={ev => { ev.stopPropagation(); setCharacterGenOpen(true) }}
                   disabled={bootstrapping}
                   title="Open Agent: generate a character"
@@ -1713,7 +1714,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                 {onOpenAdvanced && (
                   <button
                     type="button"
-                    className={`${styles.toolbarIconBtn} ${styles.toolbarControlBtn}`}
+                    className={ah.btn}
                     onClick={ev => { ev.stopPropagation(); onOpenAdvanced() }}
                     disabled={bootstrapping}
                     title="Advanced: define the agent with a structured spec, hard tool limits and a review step"
@@ -1723,8 +1724,6 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                   </button>
                 )}
               </div>
-            {/* Location as a small monochrome map card, with a small
-                "factor in location" tickbox at its right. */}
             <div className={`${styles.locationMap} ${!factorLocation ? styles.locationMapOff : ''}`}>
               <button
                 type="button"

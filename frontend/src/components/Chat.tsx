@@ -27,6 +27,7 @@ import { extractMermaidDiagrams } from '../mermaidExtract'
 import AgentBriefingModal from './AgentBriefingModal'
 import ResultRating from './ResultRating'
 import styles from '../styles/Chat.module.css'
+import ah from '../styles/AgentHeader.module.css'
 import splashLogo from '../assets/favicon.png'
 
 type ToolbarIconName = 'save' | 'saved' | 'roster' | 'export' | 'exporting' | 'copyChat' | 'copiedChat' | 'newAgent' | 'attach' | 'imagePlaceholder' | 'send' | 'location' | 'clock'
@@ -1087,7 +1088,6 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
         />
       )}
       <header className={styles.header}>
-        <div className={styles.headerIdentity}>
           {/* Goes back to the Setup/search screen — navigation only, unlike
               "New agent" in the toolbar (which recommissions this same agent
               and wipes its messages). A past version of this logo doubled as
@@ -1097,77 +1097,83 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
           <button type="button" className={styles.headerLogoBtn} onClick={onBackToSetup} aria-label="Back to search">
             <img src={splashLogo} alt="Agent One" className={styles.headerLogo} />
           </button>
-
-          <div className={styles.headerIdentityText}>
-            <span className={styles.headerTitle}>Agent {agentName}</span>
-            {activePersonalityLabels.length > 0 && (
-              <span className={styles.personaTraits}>
-                {activePersonalityLabels.join(' · ')}
+        {/* The logo sits alone, centred, above the agent's header, as on
+            Setup. The header is shared with Setup (AgentHeader.module.css):
+            row 1 is the name and meta line, row 2 the action strip. */}
+        <div className={`${ah.header} ${styles.headerBox}`}>
+          <div className={ah.identity}>
+            <span className={ah.name}>Agent {agentName}</span>
+            <div className={ah.meta}>
+              <span className={ah.metaItem} title={shownModelTitle}>
+                <span aria-hidden="true">🧠</span> {shownModel}
               </span>
-            )}
-            {usedLocation && (
-              <span className={styles.locationBadge}>
-                <ToolbarIcon name="location" /> {usedLocation}
+              {usedLocation && (
+                <span className={ah.metaItem}>
+                  <ToolbarIcon name="location" /> {usedLocation}
+                </span>
+              )}
+              <span className={ah.metaItem}>
+                <ToolbarIcon name="clock" /> {formatDate(now, getDateFormat(), true)}
               </span>
-            )}
-            <span className={styles.dateTimeBadge}>
-              <ToolbarIcon name="clock" /> {formatDate(now, getDateFormat(), true)}
-            </span>
+              {activePersonalityLabels.length > 0 && (
+                <span className={ah.metaItem}>
+                  {activePersonalityLabels.join(' · ')}
+                </span>
+              )}
+            </div>
           </div>
-        </div>
-        <div className={styles.headerActions}>
-          <span className={styles.modelBadge} title={shownModelTitle}>
-            {shownModel}
-          </span>
-          <div className={styles.headerActionButtons}>
+          <div className={ah.actions}>
+            <div className={ah.group} role="group" aria-label="Conversation actions">
+              <button
+                type="button"
+                className={ah.btn}
+                onClick={handleSaveChat}
+                disabled={messages.length === 0}
+                aria-label={saveFeedback ?? 'Save chat'}
+                title={saveFeedback ?? 'Save this conversation locally so it can be reopened later'}
+              >
+                <ToolbarIcon name={saveFeedback ? 'saved' : 'save'} />
+              </button>
+              <button
+                type="button"
+                className={ah.btn}
+                onClick={() => setRosterOpen(o => !o)}
+                disabled={messages.length === 0}
+                aria-label="Roster"
+                title="Save this agent and deploy them as a callable tool on the roster"
+              >
+                <ToolbarIcon name="roster" />
+              </button>
+              <button
+                type="button"
+                className={ah.btn}
+                onClick={handleCopyChat}
+                disabled={messages.length === 0}
+                aria-label={copyFeedback ?? 'Copy chat'}
+                title={copyFeedback ?? 'Copy the whole conversation as formatted HTML'}
+              >
+                <ToolbarIcon name={copyFeedback === 'Copied ✓' ? 'copiedChat' : 'copyChat'} />
+              </button>
+              <button
+                type="button"
+                className={ah.btn}
+                onClick={handleExportPdf}
+                disabled={messages.length === 0 || exporting}
+                aria-label={exporting ? 'Exporting…' : 'Export PDF'}
+                title="Export PDF"
+              >
+                <ToolbarIcon name={exporting ? 'exporting' : 'export'} />
+              </button>
+            </div>
             <button
               type="button"
-              className={styles.saveBtn}
-              onClick={handleSaveChat}
-              disabled={messages.length === 0}
-              aria-label={saveFeedback ?? 'Save chat'}
-              title={saveFeedback ?? 'Save this conversation locally so it can be reopened later'}
-            >
-              <ToolbarIcon name={saveFeedback ? 'saved' : 'save'} />
-            </button>
-            <button
-              type="button"
-              className={styles.rosterBtn}
-              onClick={() => setRosterOpen(o => !o)}
-              disabled={messages.length === 0}
-              aria-label="Roster"
-              title="Save this agent and deploy them as a callable tool on the roster"
-            >
-              <ToolbarIcon name="roster" />
-            </button>
-            <button
-              type="button"
-              className={styles.copyBtn}
-              onClick={handleCopyChat}
-              disabled={messages.length === 0}
-              aria-label={copyFeedback ?? 'Copy chat'}
-              title={copyFeedback ?? 'Copy the whole conversation as formatted HTML'}
-            >
-              <ToolbarIcon name={copyFeedback === 'Copied ✓' ? 'copiedChat' : 'copyChat'} />
-            </button>
-            <button
-              type="button"
-              className={styles.exportBtn}
-              onClick={handleExportPdf}
-              disabled={messages.length === 0 || exporting}
-              aria-label={exporting ? 'Exporting…' : 'Export PDF'}
-              title="Export PDF"
-            >
-              <ToolbarIcon name={exporting ? 'exporting' : 'export'} />
-            </button>
-            <button
-              type="button"
-              className={styles.resetBtn}
+              className={`${ah.btn} ${ah.btnText} ${ah.btnPrimary}`}
               onClick={onReset}
               aria-label="New agent"
               title="New agent — recommission a fresh agent, wiping this conversation"
             >
               <ToolbarIcon name="newAgent" />
+              <span>New agent</span>
             </button>
           </div>
         </div>

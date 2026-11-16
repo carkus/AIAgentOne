@@ -560,82 +560,11 @@
   gap: 0.85rem;
 }
 
-/* The agent's header: one panel in the location card's look, with an
-   accent rule along the bottom like a form header. The name on the left
-   with the model under it; the agent controls and location in their own
-   panel at the right. */
+/* The agent's header; its look is AgentHeader.module.css, shared with
+   Chat. This only places it. */
 .agentCardMain {
-  display: flex;
-  flex-wrap: wrap; /* narrow screens: the rest drops under the name */
-  align-items: center;
-  gap: 0.75rem 1rem;
   flex-shrink: 0;
-  margin: 0 8px 0.5rem 0; /* right edge lines up with the panel below */
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--graph-35);
-  border-bottom: 2px solid var(--color-accent);
-  border-radius: 8px;
-  background: var(--color-surface);
-}
-
-.agentNameBlock {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.4rem;
-  flex: none;
-}
-
-.agentNameBlock .title {
-  margin: 0;
-}
-
-.agentSelectBtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  height: 2.4rem; /* same height as the other agent controls */
-  box-sizing: border-box;
-  padding: 0 0.7rem;
-  /* Matches .toolbarIconBtn, the buttons beside it. */
-  border: 1px solid #e2dfd5;
-  border-radius: var(--radius-control);
-  background: var(--color-surface);
-  color: var(--color-accent);
-  font: inherit;
-  font-size: var(--font-size-sm);
-  cursor: pointer;
-  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
-}
-
-.agentSelectBtn svg {
-  width: 1rem;
-  height: 1rem;
-}
-
-.agentSelectBtn:hover:not(:disabled) {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  color: #fff;
-}
-
-.agentSelectBtn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-/* The agent controls and the location, in their own panel at the right
-   of the agent's header. */
-.agentBar {
-  margin-left: auto;
-  min-width: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.4rem;
-  border: 1px solid var(--graph-35);
-  border-radius: 8px;
+  margin: 0 8px 0.2rem 0; /* right edge lines up with the panel below */
 }
 
 .personalityRow {
@@ -798,16 +727,6 @@
 
 /* Save / Open / Advanced: the agent's own controls, a little larger than
    the output and Clear buttons. */
-.toolbarControlBtn {
-  width: 2.4rem;
-  height: 2.4rem;
-}
-
-.toolbarControlBtn svg {
-  width: 1.2rem;
-  height: 1.2rem;
-}
-
 /* Set apart from the other toolbar buttons (Clear, after the outputs). */
 .toolbarIsolated {
   margin-left: 0.75rem;
@@ -3151,18 +3070,9 @@
   line-height: 1;
 }
 
-/* Location: a small map card at the right of the agent's name. One ink,
+/* Location: a small map card at the right of the header's action strip. One ink,
    the --graph-* ramp: a faint street grid with a couple of heavier
    "roads", the pin and place name over it, the switch on a white strip. */
-/* Location card with the model under it. */
-/* The model button, under the name. */
-.agentNameBlock .modelLiner {
-  margin: 0;
-  padding: 0.3rem 0.6rem;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
 .locationMap {
   display: flex;
   align-items: stretch;
@@ -3182,8 +3092,8 @@
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  min-height: 3.6rem;
-  padding: 0.5rem 0.6rem;
+  min-height: 2.4rem; /* same height as the header buttons beside it */
+  padding: 0.3rem 0.6rem;
   box-sizing: border-box;
   color: var(--graph-100);
   background-color: var(--graph-10);
@@ -3322,17 +3232,4 @@
   padding: 0 0.2rem;
 }
 
-/* The agent controls (Select agent, Save, Open agent, Advanced), first in
-   the right-hand panel. */
-.agentControls {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-}
 
-/* The Select agent button while the pool popup is open. */
-.agentControlOpen {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  color: #fff;
-}
