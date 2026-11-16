@@ -1,5 +1,5 @@
 // Live graph of what the agent is doing while it's configured and deployed:
-// Focus → Character → Brief → Outputs on the Setup steps, then the bootstrap
+// Character → Focus → Brief → Outputs on the Setup steps, then the bootstrap
 // stages streamed from bootstrap.py (grounding → design → one node per tool
 // → code checks → self-checks → ready). Each node is pending, active (shows
 // the current status line), done, skipped or failed. Drawn with ColumnGraph,

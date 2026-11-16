@@ -226,8 +226,8 @@ function SectionHeader({ label, count, expanded, onToggle, help, right }: {
 type SetupStepId = 'character' | 'focus' | 'brief' | 'outputs'
 
 const SETUP_STEPS: { id: SetupStepId; label: string; help: string }[] = [
-  { id: 'focus', label: 'Focus', help: 'Step 1: the job. The topics, roles or keywords the agent works on: type new ones or pick from your Saved Focus pool. At least one is needed.' },
-  { id: 'character', label: 'Character', help: "Step 2: who the agent is. Personality traits and behavior toggles, both optional, shape its generated system prompt." },
+  { id: 'character', label: 'Character', help: "Step 1: who the agent is. Personality traits and behavior toggles, both optional, shape its generated system prompt." },
+  { id: 'focus', label: 'Focus', help: 'Step 2: the job. The topics, roles or keywords the agent works on: type new ones or pick from your Saved Focus pool. At least one is needed.' },
   { id: 'brief', label: 'Brief', help: "Step 3: a live preview of what this agent has agreed to do, generated from its type, focus and character. It's read-only: change those steps to change it." },
   { id: 'outputs', label: 'Outputs', help: "Step 4: what the agent hands back. It proposes the outputs it judges most useful for this job and ticks its own picks; change them freely. Chosen outputs are offered as ready-to-build files after each research turn." },
 ]
@@ -597,7 +597,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     return () => window.removeEventListener('keydown', onKey)
   }, [dossierOpen])
   const [specialtiesOpen, setSpecialtiesOpen] = useState(true)
-  const [setupStep, setSetupStep] = useState<SetupStepId>('focus')
+  const [setupStep, setSetupStep] = useState<SetupStepId>('character')
   // The prose brief under the brief graph; the graph is the at-a-glance view.
   const [writtenBriefOpen, setWrittenBriefOpen] = useState(false)
   const [briefGraphOpen, setBriefGraphOpen] = useState(true)
@@ -989,13 +989,13 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
           ? { icon: '📦', title: 'Outputs', state: 'pending', detail: 'Waiting for the new brief' }
           : { icon: '📦', title: 'Outputs', state: 'pending', detail: 'Proposed on the Outputs step' }
     const columns: ColumnNode<ProcessNodeData>[][] = [
+      [{ id: 'character', data: { icon: '🎭', title: 'Character', state: 'done',
+        items: [getTemplate(agentType).label, ...character],
+        detail: character.length > 0 ? undefined : 'No traits or behaviour chosen' } }],
       [{ id: 'focus', data: keywords.length > 0
         ? { icon: '🎯', title: 'Focus', state: 'done', items: keywords.map(k => shortFocus(k).toUpperCase()),
             detail: focusOverlaps.length > 0 ? `${focusOverlaps.length} overlapping pair${focusOverlaps.length === 1 ? '' : 's'}` : undefined }
         : { icon: '🎯', title: 'Focus', state: setupStep === 'focus' ? 'active' : 'pending', detail: 'Add at least one topic' } }],
-      [{ id: 'character', data: { icon: '🎭', title: 'Character', state: 'done',
-        items: [getTemplate(agentType).label, ...character],
-        detail: character.length > 0 ? undefined : 'No traits or behaviour chosen' } }],
       [{ id: 'brief', data: briefNode }],
       [{ id: 'outputs', data: outputsNode }],
     ]
