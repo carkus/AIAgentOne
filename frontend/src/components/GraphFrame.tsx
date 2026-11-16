@@ -35,6 +35,11 @@ interface Props {
   scrollX?: boolean
   contentWidth?: number
   scrollRef?: Ref<HTMLDivElement>
+  // False hides the zoom/fit/scale controls (a small graph that always
+  // shows at its own size).
+  controls?: boolean
+  // False hides just +/−/fit and the scale, keeping ⛶ when onExpand is set.
+  zoomButtons?: boolean
 }
 
 const MIN_SCALE = 0.1
@@ -50,7 +55,7 @@ const CONTROLS_GAP = 8
 // cover the bottom of the graph.
 const SCROLLBAR_ALLOWANCE = 14
 
-export default function GraphFrame({ children, zoom, onExpand, className, contentClassName, label = 'Graph', height: externalHeight, scrollX, contentWidth, scrollRef }: Props) {
+export default function GraphFrame({ children, zoom, onExpand, className, contentClassName, label = 'Graph', height: externalHeight, scrollX, contentWidth, scrollRef, controls = true, zoomButtons = true }: Props) {
   const frameRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const controlsRef = useRef<HTMLDivElement>(null)
@@ -178,15 +183,19 @@ export default function GraphFrame({ children, zoom, onExpand, className, conten
           {children}
         </div>
       )}
+      {controls && (zoomButtons || onExpand) && (
       <div ref={controlsRef} className={styles.controls}>
+        {zoomButtons && <>
         <button type="button" className={styles.controlBtn} onClick={doZoomIn} aria-label="Zoom in" title="Zoom in">+</button>
         <button type="button" className={styles.controlBtn} onClick={doZoomOut} aria-label="Zoom out" title="Zoom out">−</button>
         <button type="button" className={styles.controlBtn} onClick={doFit} aria-label="Fit to frame" title="Fit to frame">⤢</button>
+        </>}
         {onExpand && (
           <button type="button" className={styles.controlBtn} onClick={onExpand} aria-label="Open full view" title="Open full view">⛶</button>
         )}
-        <span className={styles.level}>{Math.round(level * 100)}%</span>
+        {zoomButtons && <span className={styles.level}>{Math.round(level * 100)}%</span>}
       </div>
+      )}
     </div>
   )
 }

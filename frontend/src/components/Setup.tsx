@@ -1,29 +1,68 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { bootstrap, buildBriefRelic, createAgentDraft, createSavedSearch, deleteAgentDraft, deleteSavedSearch, fetchAgentBrief, fetchBriefMap, fetchModelInfo, listAgentDrafts, listPublishedAgents, listSavedSearches, unpublishAgent, updateAgentDraft } from '../api'
-import type { AgentBrief, AgentDraft, BriefMap, PublishedAgent, SavedSearch } from '../api'
+import { useEffect, useRef, useState } from 'react'
+import { bootstrap, buildBriefRelic, createAgentDraft, createSavedSearch, deleteAgentDraft, deleteSavedSearch, fetchAgentBrief, fetchBriefMap, fetchBriefOutputs, fetchFocusInsights, fetchModelInfo, listAgentDrafts, listPublishedAgents, listSavedSearches, unpublishAgent, updateAgentDraft } from '../api'
+import type { AgentBrief, AgentDraft, BriefMap, FocusInsights, PublishedAgent, SavedSearch } from '../api'
 import { getLastOpenedPointer, hideSavedChat, loadHiddenChatIds, loadSavedChats, saveChat, setLastOpenedPointer } from '../chatStorage'
-import type { AgentConfig, AgentTemplateId, ArmStat, BootstrapStreamEvent, LlmProvider, Relic, RelicKind, RelicSuggestion, SavedChat, SavedChatMessage, SearchDefaults } from '../types'
+import type { AgentConfig, AgentTemplateId, ArmStat, BootstrapStreamEvent, Deliverable, LlmProvider, Relic, RelicKind, RelicSuggestion, SavedChat, SavedChatMessage, SearchDefaults } from '../types'
 import { AGENT_TEMPLATES, getTemplate, PERSONALITY_TRAITS, describeTraitEffect, BEHAVIOR_TOGGLES, DEFAULT_AGENT_SPEC, MAX_FOCUS_CHARS, shortFocus, type BehaviorToggle } from '../agentTypes'
 import { storedOllamaModel, storedCloudflareModel, describeModel, describeModelFallback, formatModelInfo, type ModelInfo } from '../modelLabel'
 import { buildAgentBrief, joinNatural } from '../agentBrief'
 import { formatDate, getDateFormat, type DateFormatId } from '../dateFormat'
 import styles from '../styles/Setup.module.css'
+import ah from '../styles/AgentHeader.module.css'
 import splashLogo from '../assets/favicon.png'
 import BriefGraph from './BriefGraph'
+import ProcessGraph, { applyDeployEvent, deployColumns, EMPTY_DEPLOY_RUN, type DeployRun, type ProcessNodeData } from './ProcessGraph'
+import type { ColumnNode } from './ColumnGraph'
 import SettingsModal from './SettingsModal'
 import ThemePicker from './ThemePicker'
 import AgentStableModal from './AgentStableModal'
+import AgentPool from './AgentPool'
 import ScoreboardModal from './ScoreboardModal'
+import LocationMapModal from './LocationMapModal'
 import CharacterGenerator from './CharacterGenerator'
 import HelpTip from './HelpTip'
 import BehaviorIcon from './BehaviorIcon'
 import RelicPreviewModal from './RelicPreviewModal'
 import { useToolbarDrag, useToolbarLayout, type ToolbarItem } from '../toolbarLayout'
-import { downloadRelic, RELIC_LABELS, relicFilename } from '../relicFiles'
+import { downloadRelic, RELIC_KINDS, RELIC_LABELS, relicFilename } from '../relicFiles'
 
 // Mono line icons matching the app's stroke-based visual style — plain
 // geometric shapes (magnifier / briefcase / compass), not emoji, so they
 // pick up the pill's currentColor and stay crisp at any size.
+// What a built agent was built from: every step that changes its bootstrap.
+// A saved agent whose key matches the current steps can be reused as it is
+// instead of being built again. Provider/model aren't part of it: they only
+// choose who runs the agent, so a reused agent takes the current choice.
+interface BuildInputs {
+  template: AgentTemplateId
+  keywords: string[]
+  location: string
+  factorLocation: boolean
+  toggles: string[]
+  traits: string[]
+  outputs: string[]
+}
+
+function buildKey(b: BuildInputs): string {
+  const sorted = (xs: string[]) => [...xs].sort()
+  return JSON.stringify([
+    b.template, sorted(b.keywords), b.location.trim(), b.factorLocation,
+    sorted(b.toggles), sorted(b.traits), sorted(b.outputs),
+  ])
+}
+
+function configBuildKey(cfg: AgentConfig): string {
+  return buildKey({
+    template: cfg.template ?? 'research',
+    keywords: cfg.keywords ?? [],
+    location: cfg.location ?? '',
+    factorLocation: cfg.factor_location ?? false,
+    toggles: cfg.active_toggles ?? [],
+    traits: cfg.active_traits ?? [],
+    outputs: (cfg.deliverables ?? []).map(d => d.kind),
+  })
+}
+
 function AgentTypeIcon({ id }: { id: AgentTemplateId }) {
   const common = {
     viewBox: '0 0 24 24',
@@ -86,25 +125,24 @@ function ToolsIcon() {
 // Toolbar icon per output kind (the Brief's offered relics).
 // The Setup toolbar's buttons (toolbarLayout.ts): the default order is the
 // order listed here; dragging a button on the toolbar reorders its group.
-// Save Agent is locked on (it must always be visible). The outputs are a
+// The agent controls (Save, pool, Open agent, Advanced) aren't here: they
+// sit in their own panel under the agent's name. The outputs are a
 // fixed set (hide/reorder them in the toolbar builder); the Brief's picks
 // only mark one or two of them as suggested. No chart: the Brief comes
 // before any research, so there are no numbers to chart.
 const SETUP_TOOLBAR_ITEMS: ToolbarItem[] = [
-  { id: 'clear', label: 'Clear', group: 'danger' },
-  { id: 'save', label: 'Save agent', group: 'controls', locked: true },
-  { id: 'open', label: 'Open agent', group: 'controls' },
-  { id: 'advanced', label: 'Advanced setup', group: 'controls' },
   ...(['pdf', 'docx', 'markdown', 'slides', 'diagram', 'json'] as RelicKind[])
     .map(kind => ({ id: kind, label: RELIC_LABELS[kind], group: 'outputs' })),
 ]
 
-function ClearIcon() {
+// Stacked cards: the saved agents to reload.
+function AgentPoolIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M3 6h18" />
-      <path d="M8 6V4h8v2" />
-      <path d="M6 6l1 14a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-14" />
+      <rect x="3" y="8" width="14" height="12" rx="1.5" />
+      <path d="M7 5h12.5A1.5 1.5 0 0 1 21 6.5V16" />
+      <circle cx="10" cy="12.5" r="2" />
+      <path d="M6.5 18a3.5 3.5 0 0 1 7 0" />
     </svg>
   )
 }
@@ -186,46 +224,43 @@ function SectionHeader({ label, count, expanded, onToggle, help, right }: {
   )
 }
 
-type SetupTabId = 'builder' | 'brief'
+type SetupStepId = 'character' | 'focus' | 'brief' | 'outputs'
 
-const SETUP_TABS: { id: SetupTabId; label: string; help: string }[] = [
-  { id: 'builder', label: 'Agent builder', help: 'Everything that makes up the agent: its personality, behavior and the Focus topics it works on. The Brief is drawn from these.' },
-  { id: 'brief', label: 'Brief', help: "The Brief is a live preview of what this agent has agreed to do, generated from its type, focus, behavior and personality. It's read-only: edit the Agent builder fields to change it." },
+const SETUP_STEPS: { id: SetupStepId; label: string; help: string }[] = [
+  { id: 'character', label: 'Character', help: "Step 1: who the agent is. Personality traits and behavior toggles, both optional, shape its generated system prompt." },
+  { id: 'focus', label: 'Focus', help: 'Step 2: the job. The topics, roles or keywords the agent works on: type new ones or pick from your Saved Focus pool. At least one is needed.' },
+  { id: 'brief', label: 'Brief', help: "Step 3: a live preview of what this agent has agreed to do, generated from its type, focus and character. It's read-only: change those steps to change it." },
+  { id: 'outputs', label: 'Outputs', help: "Step 4: what the agent hands back. It proposes the outputs it judges most useful for this job and ticks its own picks; change them freely. Chosen outputs are offered as ready-to-build files after each research turn." },
 ]
 
-// Folder tabs for the setup card's two views (Agent builder, Brief), drawn
-// like the Agent Dossier's tab. One view shows at a time; sections inside
-// keep their own SectionHeader.
-function SetupTabs({ active, onSelect }: { active: SetupTabId; onSelect: (id: SetupTabId) => void }) {
-  const onKeyDown = (e: React.KeyboardEvent, id: SetupTabId) => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(id); return }
-    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
-      e.preventDefault()
-      const i = SETUP_TABS.findIndex(t => t.id === id)
-      const next = SETUP_TABS[(i + (e.key === 'ArrowRight' ? 1 : SETUP_TABS.length - 1)) % SETUP_TABS.length]
-      onSelect(next.id)
-      document.getElementById(`setup-tab-${next.id}`)?.focus()
-    }
-  }
+// Step navigation for the setup card: a breadcrumb of the step names, each
+// one clickable. Steps aren't gated, so the user can jump straight to any
+// of them.
+function SetupSteps({ active, onSelect }: {
+  active: SetupStepId
+  onSelect: (id: SetupStepId) => void
+}) {
   return (
-    <div className={styles.setupTabRow} role="tablist" aria-label="Agent setup views">
-      {SETUP_TABS.map(t => (
-        <div
-          key={t.id}
-          id={`setup-tab-${t.id}`}
-          className={`${styles.setupPanelTab} ${t.id === active ? '' : styles.setupPanelTabInactive}`}
-          role="tab"
-          aria-selected={t.id === active}
-          aria-controls={`setup-panel-${t.id}`}
-          tabIndex={t.id === active ? 0 : -1}
-          onClick={() => onSelect(t.id)}
-          onKeyDown={e => onKeyDown(e, t.id)}
-        >
-          <span>{t.label}</span>
-          <HelpTip text={t.help} label={`${t.label} help`} />
-        </div>
-      ))}
-    </div>
+    <nav className={styles.stepCrumbs} aria-label="Agent setup steps">
+      <ol className={styles.stepCrumbList}>
+        {SETUP_STEPS.map((s, n) => (
+          <li key={s.id} className={styles.stepCrumbItem}>
+            {n > 0 && <span className={styles.stepCrumbSep} aria-hidden="true">›</span>}
+            <button
+              type="button"
+              id={`setup-step-${s.id}`}
+              className={`${styles.stepCrumb} ${s.id === active ? styles.stepCrumbActive : ''}`}
+              onClick={() => onSelect(s.id)}
+              aria-current={s.id === active ? 'step' : undefined}
+            >
+              <span className={styles.stepCrumbNum}>{n + 1}</span>
+              {s.label}
+            </button>
+            {s.id === active && <HelpTip text={s.help} label={`${s.label} help`} />}
+          </li>
+        ))}
+      </ol>
+    </nav>
   )
 }
 
@@ -276,7 +311,7 @@ const DEFAULT_MAX_DELEGATIONS = 3
 // a soft delegation-capacity warning; this one actually blocks adding a 6th
 // specialty at all) — keeps the specialty set small enough that the Brief
 // and bootstrap prompt stay focused rather than diluted across many topics.
-const MAX_SPECIALTIES = 5
+const MAX_SPECIALTIES = 4
 
 // Deterministic warning check, used only when the AI-drafted brief (which
 // does its own, richer warning assessment — see backend/src/brief.py)
@@ -284,12 +319,14 @@ const MAX_SPECIALTIES = 5
 // template. Only checks conditions cheap/certain enough to assert without
 // an LLM call — the AI brief's own judgment always takes precedence when
 // available, including its explicit choice not to warn.
-function buildDeterministicWarning(keywords: string[], agentType: AgentTemplateId, loc: string, maxDelegations: number | null): string | null {
+function buildDeterministicWarning(keywords: string[], agentType: AgentTemplateId, loc: string | null, maxDelegations: number | null): string | null {
   const limit = maxDelegations ?? DEFAULT_MAX_DELEGATIONS
   if (keywords.length > limit) {
     return `You've added ${keywords.length} focus topics, and the agent runs up to ${limit} worker agents per research turn, so some topics will be combined or picked up in a follow-up turn rather than each getting its own worker. Trim the list or raise the worker limit in Settings if each one needs its own.`
   }
-  if (agentType === 'job_search' && !loc) {
+  // `loc` is null when the location toggle is off: that was deliberate, so
+  // no note about it.
+  if (agentType === 'job_search' && loc === '') {
     return 'No location is set, so job listings will be searched everywhere rather than in one area. Add a location if you only want roles near you.'
   }
   return null
@@ -316,7 +353,6 @@ function formatSavedAt(ts: number, format: DateFormatId): string {
 interface Props {
   agentName: string
   onAgentNameChange: (name: string) => void
-  onNewAgent: () => void
   bootstrapping: boolean
   error: string | null
   onStart: () => void
@@ -331,7 +367,7 @@ interface Props {
   onOpenAdvanced?: () => void
 }
 
-export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootstrapping, error, onStart, onDone, onError, onResumeChat, activeAgentConfig, onOpenAdvanced }: Props) {
+export default function Setup({ agentName, onAgentNameChange, bootstrapping, error, onStart, onDone, onError, onResumeChat, activeAgentConfig, onOpenAdvanced }: Props) {
   // Persisted across reloads/new-agent resets, same localStorage idiom as
   // provider/dateFormat above — otherwise the type picker silently reverted
   // to "general" every time, discarding the user's last choice.
@@ -485,12 +521,7 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
   // removed Focus survives in the original and comes back on reload).
   // Cleared by CLEAR / the logo / a generated character: a fresh agent.
   const [editing, setEditing] = useState<{ kind: 'draft' | 'chat'; id: string } | null>(null)
-  const hasAdvanced = onOpenAdvanced !== undefined
-  const toolbarItems = useMemo(
-    () => SETUP_TOOLBAR_ITEMS.filter(i => i.id !== 'advanced' || hasAdvanced),
-    [hasAdvanced],
-  )
-  const toolbarLayout = useToolbarLayout('setup', toolbarItems)
+  const toolbarLayout = useToolbarLayout('setup', SETUP_TOOLBAR_ITEMS)
   const toolbarDrag = useToolbarDrag(toolbarLayout)
   useEffect(() => {
     listAgentDrafts().then(setDrafts)
@@ -516,6 +547,10 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
   const savedKeywordPool = Array.from(
     new Set(saved.flatMap(s => s.keywords))
   ).sort((a, b) => a.localeCompare(b))
+  // Smart Focus: overlapping chosen topics and related Saved Focus items
+  // (POST /brief-focus), re-checked while the Focus step is open.
+  const [focusInsights, setFocusInsights] = useState<FocusInsights | null>(null)
+  const focusPoolKey = savedKeywordPool.join('\n')
   const hasUnsavedSpecialties = keywords.some(
     kw => !savedKeywordPool.some(pooled => pooled.toLowerCase() === kw.toLowerCase())
   )
@@ -526,8 +561,12 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
     mcp: false,
   })
   const [progress, setProgress] = useState<string | null>(null)
-  const [toolsSoFar, setToolsSoFar] = useState<string[]>([])
   const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null)
+  // The bootstrap's stages for the process graph. Kept after a failed or
+  // cancelled run, so the graph on the steps shows where it stopped.
+  const [deployRun, setDeployRun] = useState<DeployRun | null>(null)
+  const [processGraphOpen, setProcessGraphOpen] = useState(true)
+  const [savedFocusOpen, setSavedFocusOpen] = useState(true)
   // Ticks once a second for the deploying overlay's "Ns elapsed" line — same
   // reset-on-stop/interval-while-active shape as Chat.tsx's own `elapsed`
   // (its `thinking` there is `bootstrapping` here).
@@ -538,44 +577,39 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [themePickerOpen, setThemePickerOpen] = useState(false)
   const [stableModalOpen, setStableModalOpen] = useState(false)
+  const [poolOpen, setPoolOpen] = useState(false)
+  useEffect(() => {
+    if (!poolOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPoolOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [poolOpen])
   const [scoreboardOpen, setScoreboardOpen] = useState(false)
+  const [locationMapOpen, setLocationMapOpen] = useState(false)
   const [characterGenOpen, setCharacterGenOpen] = useState(false)
-  // The setup form and the dossier are both too tall to show fully at once
-  // without crowding the page, so tapping into either one expands it to
-  // ~70% height and collapses the other, at every viewport width (see
-  // .focusStack in Setup.module.css).
-  const [focusPanel, setFocusPanel] = useState<'setup' | 'dossier'>('setup')
-  // Neither panel scrolls internally by much (the setup card doesn't scroll
-  // at all; the dossier list often doesn't need to either), so a swipe/drag
-  // gesture that scrolls nothing still ends as a plain click at wherever the
-  // pointer lifted — frequently over the *other*, collapsed panel below/above,
-  // which flips focusPanel as an unintended side effect of just scrolling.
-  // Recording the pointerdown position and only honoring the click as a real
-  // tap when the pointer barely moved fixes that without needing to guess
-  // whether an actual scroll happened.
-  const panelTapStart = useRef<{ x: number; y: number } | null>(null)
-  const TAP_MOVE_THRESHOLD_PX = 10
-  function handlePanelPointerDown(e: React.PointerEvent) {
-    panelTapStart.current = { x: e.clientX, y: e.clientY }
-  }
-  function handlePanelTap(target: 'setup' | 'dossier', e: React.MouseEvent) {
-    const start = panelTapStart.current
-    if (start && (Math.abs(e.clientX - start.x) > TAP_MOVE_THRESHOLD_PX || Math.abs(e.clientY - start.y) > TAP_MOVE_THRESHOLD_PX)) {
-      return
-    }
-    setFocusPanel(target)
-  }
+  // The Agent Dossier slides in from the right, opened by the manila tab at
+  // the end of the numbered steps row. The setup card grows to its full
+  // height and the page scrolls, so the two no longer share the screen.
+  const [dossierOpen, setDossierOpen] = useState(false)
+  useEffect(() => {
+    if (!dossierOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setDossierOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [dossierOpen])
   const [specialtiesOpen, setSpecialtiesOpen] = useState(true)
-  const [setupTab, setSetupTab] = useState<SetupTabId>('builder')
+  const [setupStep, setSetupStep] = useState<SetupStepId>('character')
   // The prose brief under the brief graph; the graph is the at-a-glance view.
   const [writtenBriefOpen, setWrittenBriefOpen] = useState(false)
   const [briefGraphOpen, setBriefGraphOpen] = useState(true)
-  const [specialInstructionsOpen, setSpecialInstructionsOpen] = useState(false)
+  // Open by default: they're all there is on the Character step.
+  const [specialInstructionsOpen, setSpecialInstructionsOpen] = useState(true)
   const [activeToggles, setActiveToggles] = useState<string[]>([])
   function toggleBehavior(id: string) {
     setActiveToggles(prev => prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id])
   }
-  const [personalityOpen, setPersonalityOpen] = useState(false)
+  const [typeOpen, setTypeOpen] = useState(true)
+  const [personalityOpen, setPersonalityOpen] = useState(true)
   const [selectedTraits, setSelectedTraits] = useState<string[]>([])
   function toggleTrait(id: string) {
     setSelectedTraits(prev => prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id])
@@ -596,6 +630,22 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
   const [briefRelicBusy, setBriefRelicBusy] = useState<RelicKind | null>(null)
   const [briefRelicError, setBriefRelicError] = useState<string | null>(null)
   const [briefRelicPreview, setBriefRelicPreview] = useState<RelicKind | null>(null)
+  // Outputs step: what the agent proposes to hand back (POST /brief-outputs),
+  // and the kinds the user has ticked. Proposed once per brief, when the
+  // step is opened; null proposals after a failed call means the step falls
+  // back to every relic kind, picked by hand.
+  const [outputProposals, setOutputProposals] = useState<Deliverable[] | null>(null)
+  const [outputsLoading, setOutputsLoading] = useState(false)
+  const [outputsFailed, setOutputsFailed] = useState(false)
+  // True from the moment a brief rebuild is scheduled until its request goes
+  // out (the debounce window), so the outputs wait for the new brief.
+  const [briefScheduled, setBriefScheduled] = useState(false)
+  const [chosenOutputs, setChosenOutputs] = useState<RelicKind[]>([])
+  // Outputs from a reloaded profile or job. They stand in as the choice
+  // until the Outputs step proposes again, then become its ticks.
+  const [restoredOutputs, setRestoredOutputs] = useState<{ kind: RelicKind; title: string }[] | null>(null)
+  const outputsKeyRef = useRef('')
+  const outputsRequestIdRef = useRef(0)
   const [answeringBrief, setAnsweringBrief] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const locationDebounceRef = useRef<number | undefined>(undefined)
@@ -721,7 +771,7 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
       const content = await buildBriefRelic(suggestion, aiBrief.text, {
         agentType,
         keywords: [...keywords],
-        location: location.trim(),
+        location: usedLocation,
         traits: (PERSONALITY_TRAITS[agentType] ?? PERSONALITY_TRAITS.research).filter(t => selectedTraits.includes(t.id)).map(t => t.label),
         behaviors: BEHAVIOR_TOGGLES.filter(t => activeToggles.includes(t.id)).map(t => t.label),
         warning: aiBrief.warning,
@@ -766,6 +816,7 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
   useEffect(() => {
     if (keywords.length === 0) {
       lastBriefInputsRef.current = ''
+      setBriefScheduled(false)
       setAiBrief(null)
       setBriefMap(null)
       setBriefMapLoading(false)
@@ -773,8 +824,21 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
       return
     }
     window.clearTimeout(briefDebounceRef.current)
-    if (briefInputsKey === lastBriefInputsRef.current) return
+    if (briefInputsKey === lastBriefInputsRef.current) {
+      setBriefScheduled(false)
+      return
+    }
     const requestId = ++briefRequestIdRef.current
+    // A new brief is on its way: the outputs proposed for the old one no
+    // longer apply. Clear them (dropping any proposal still in flight) and
+    // let the Outputs step propose again once the new brief lands.
+    setBriefScheduled(true)
+    outputsRequestIdRef.current++
+    outputsKeyRef.current = ''
+    setOutputProposals(null)
+    setOutputsFailed(false)
+    setOutputsLoading(false)
+    setChosenOutputs([])
     const behaviorLabels = BEHAVIOR_TOGGLES.filter(t => activeToggles.includes(t.id)).map(t => t.label)
     const traitLabels = (PERSONALITY_TRAITS[agentType] ?? PERSONALITY_TRAITS.research)
       .filter(t => selectedTraits.includes(t.id)).map(t => t.label)
@@ -782,6 +846,7 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
       // Recorded when the request actually goes out, so a change undone
       // inside the debounce window doesn't count as built.
       lastBriefInputsRef.current = briefInputsKey
+      setBriefScheduled(false)
       setBriefLoading(true)
       fetchAgentBrief(agentType, [...keywords], usedLocation, agentName, provider, activeModel, undefined, undefined, maxDelegations, behaviorLabels, traitLabels)
         .then(result => {
@@ -805,6 +870,148 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
     return () => window.clearTimeout(briefDebounceRef.current)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [briefInputsKey])
+
+  // Proposes outputs when the Outputs step is open and the brief has
+  // settled; a changed brief (or focus/character) proposes again and resets
+  // the ticks to the agent's new picks.
+  useEffect(() => {
+    if (setupStep !== 'outputs' || keywords.length === 0 || briefLoading || briefScheduled) return
+    const key = briefInputsKey + '|' + (aiBrief?.text ?? '')
+    if (key === outputsKeyRef.current) return
+    outputsKeyRef.current = key
+    const requestId = ++outputsRequestIdRef.current
+    const behaviorLabels = BEHAVIOR_TOGGLES.filter(t => activeToggles.includes(t.id)).map(t => t.label)
+    const traitLabels = (PERSONALITY_TRAITS[agentType] ?? PERSONALITY_TRAITS.research)
+      .filter(t => selectedTraits.includes(t.id)).map(t => t.label)
+    setOutputsLoading(true)
+    setOutputsFailed(false)
+    fetchBriefOutputs([...keywords], aiBrief?.type === 'brief' ? aiBrief.text : '', agentType, traitLabels, behaviorLabels, provider, activeModel)
+      .then(outputs => {
+        if (requestId !== outputsRequestIdRef.current) return
+        if (restoredOutputs) {
+          // A reloaded agent keeps its own picks, even ones the agent
+          // didn't propose this time.
+          const missing = outputs ? restoredOutputs.filter(r => !outputs.some(o => o.kind === r.kind)) : []
+          setOutputProposals(outputs ? [...outputs, ...missing] : null)
+          setChosenOutputs(restoredOutputs.map(r => r.kind))
+          setRestoredOutputs(null)
+        } else {
+          setOutputProposals(outputs)
+          setChosenOutputs(outputs ? outputs.filter(o => o.recommended).map(o => o.kind) : [])
+        }
+        setOutputsFailed(outputs === null)
+        setOutputsLoading(false)
+      })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setupStep, briefInputsKey, aiBrief?.text, briefLoading, briefScheduled])
+
+  // The outputs shown on the step: the agent's proposals, or every kind
+  // when proposing failed.
+  const outputOptions: Deliverable[] = outputProposals
+    ?? (outputsFailed ? RELIC_KINDS.map(kind => ({ kind, title: RELIC_LABELS[kind] })) : [])
+  const chosenDeliverables = restoredOutputs
+    ?? outputOptions
+      .filter(o => chosenOutputs.includes(o.kind))
+      .map(({ kind, title }) => ({ kind, title }))
+
+  // The loaded profile's or job's built agent, when the steps still match
+  // what it was built from: Deploy then opens it straight away instead of
+  // building it again. Change any step and it's null, so Deploy rebuilds.
+  const currentTraitIds = (PERSONALITY_TRAITS[agentType] ?? PERSONALITY_TRAITS.research)
+    .filter(t => selectedTraits.includes(t.id)).map(t => t.id)
+  const currentBuildKey = buildKey({
+    template: agentType,
+    keywords,
+    location: usedLocation,
+    factorLocation,
+    toggles: activeToggles,
+    traits: currentTraitIds,
+    outputs: chosenDeliverables.map(d => d.kind),
+  })
+  const loadedBuild: AgentConfig | undefined = editing?.kind === 'draft'
+    ? drafts.find(d => d.id === editing.id)?.builtConfig
+    : editing?.kind === 'chat'
+      ? savedChats.find(c => c.id === editing.id)?.agentConfig
+      : undefined
+  const reusableConfig = loadedBuild && configBuildKey(loadedBuild) === currentBuildKey ? loadedBuild : null
+
+  function toggleOutput(kind: RelicKind) {
+    setChosenOutputs(prev => prev.includes(kind) ? prev.filter(k => k !== kind) : [...prev, kind])
+  }
+
+  // Debounced like the brief; embeddings are memoised server-side, so a
+  // re-check after one add or remove only embeds the new topic.
+  useEffect(() => {
+    if (setupStep !== 'focus' || keywords.length === 0) {
+      setFocusInsights(null)
+      return
+    }
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => {
+      fetchFocusInsights([...keywords], savedKeywordPool, provider, controller.signal)
+        .then(result => { if (!controller.signal.aborted) setFocusInsights(result) })
+    }, 500)
+    return () => { window.clearTimeout(timer); controller.abort() }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setupStep, keywords.join('\n'), focusPoolKey, provider])
+
+  // Only insights that still match the current topics (a stale reply can
+  // land just after a remove).
+  const focusOverlaps = (focusInsights?.overlaps ?? []).filter(o =>
+    keywords.includes(o.a) && keywords.includes(o.b))
+  const focusRelated = (focusInsights?.related ?? []).filter(r =>
+    keywords.includes(r.near) && !keywords.some(k => k.toLowerCase() === r.topic.toLowerCase()))
+
+  // The process graph: the Setup steps as the agent has taken them so far,
+  // then the deploy (bootstrap) stages.
+  const commissionColumns: ColumnNode<ProcessNodeData>[][] = (() => {
+    const traitLabels = (PERSONALITY_TRAITS[agentType] ?? PERSONALITY_TRAITS.research)
+      .filter(t => selectedTraits.includes(t.id)).map(t => t.label)
+    const behaviorLabels = BEHAVIOR_TOGGLES.filter(t => activeToggles.includes(t.id)).map(t => t.label)
+    const character = [...traitLabels, ...behaviorLabels]
+    const briefNode: ProcessNodeData = keywords.length === 0
+      ? { icon: '📝', title: 'Brief', state: 'pending', detail: 'Drafted once there is Focus' }
+      : briefLoading
+        ? { icon: '📝', title: 'Brief', state: 'active', detail: 'Drafting the brief…' }
+        : aiBrief?.type === 'question'
+          ? { icon: '📝', title: 'Brief', state: 'active', detail: `Asking you: ${aiBrief.text}` }
+          : aiBrief
+            ? { icon: '📝', title: 'Brief', state: 'done', detail: aiBrief.text.length > 160 ? `${aiBrief.text.slice(0, 157)}…` : aiBrief.text }
+            : briefError
+              ? { icon: '📝', title: 'Brief', state: 'error', detail: 'AI brief failed; using the basic brief' }
+              : { icon: '📝', title: 'Brief', state: 'pending' }
+    const outputsNode: ProcessNodeData = outputsLoading
+      ? { icon: '📦', title: 'Outputs', state: 'active', detail: 'Proposing outputs for this job…' }
+      : outputProposals || outputsFailed
+        ? chosenDeliverables.length > 0
+          ? { icon: '📦', title: 'Outputs', state: 'done', items: chosenDeliverables.map(d => d.title) }
+          : { icon: '📦', title: 'Outputs', state: 'skipped', detail: 'None chosen' }
+        : briefScheduled || briefLoading
+          ? { icon: '📦', title: 'Outputs', state: 'pending', detail: 'Waiting for the new brief' }
+          : { icon: '📦', title: 'Outputs', state: 'pending', detail: 'Proposed on the Outputs step' }
+    const columns: ColumnNode<ProcessNodeData>[][] = [
+      [{ id: 'character', data: { icon: '🎭', title: 'Character', state: 'done',
+        items: [getTemplate(agentType).label, ...character],
+        detail: character.length > 0 ? undefined : 'No traits or behaviour chosen' } }],
+      [{ id: 'focus', data: keywords.length > 0
+        ? { icon: '🎯', title: 'Focus', state: 'done', items: keywords.map(k => shortFocus(k).toUpperCase()),
+            detail: focusOverlaps.length > 0 ? `${focusOverlaps.length} overlapping pair${focusOverlaps.length === 1 ? '' : 's'}` : undefined }
+        : { icon: '🎯', title: 'Focus', state: setupStep === 'focus' ? 'active' : 'pending', detail: 'Add at least one topic' } }],
+      [{ id: 'brief', data: briefNode }],
+      [{ id: 'outputs', data: outputsNode }],
+    ]
+    // Each one is a Setup step: clicking it opens that step.
+    return columns.map(col => col.map(n => ({ ...n, data: { ...n.data, link: true, selected: n.id === setupStep } })))
+  })()
+  const processColumns: ColumnNode<ProcessNodeData>[][] = deployRun
+    ? [...commissionColumns, ...deployColumns(deployRun)]
+    : [...commissionColumns, [{ id: 'deploy', data: { icon: '🚀', title: 'Deploy', state: 'pending', detail: 'Builds the agent from these steps' } }]]
+  // While deploying, the graph draws only the deploy stages, after one node
+  // standing for the finished commission.
+  const deployOnlyColumns: ColumnNode<ProcessNodeData>[][] = [
+    [{ id: 'commission', data: { icon: '📨', title: 'Commission', state: 'done', items: keywords.map(k => shortFocus(k).toUpperCase()) } }],
+    ...deployColumns(deployRun ?? EMPTY_DEPLOY_RUN),
+  ]
 
   function handleBriefAnswerSubmit() {
     const answer = briefAnswer.trim()
@@ -911,8 +1118,9 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
     setSelectedTraits([])
     setAiBrief(null)
     setBriefAnswer('')
+    setRestoredOutputs(null)
     setCommissionHint(null)
-    setFocusPanel('setup')
+    setDossierOpen(false)
     inputRef.current?.focus()
   }
 
@@ -1059,13 +1267,15 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
     if (editing?.kind === 'chat' && saveChatEdits(editing.id)) return
     const traitPool = PERSONALITY_TRAITS[agentType] ?? PERSONALITY_TRAITS.research
     const traits = traitPool.filter(t => selectedTraits.includes(t.id)).map(t => t.label)
+    // Keep the built agent only while it still matches these steps.
+    const extras = { factorLocation, outputs: chosenDeliverables.map(d => d.kind), builtConfig: reusableConfig }
     try {
       let updated: AgentDraft | null = null
       if (editing?.kind === 'draft') {
         // A profile deleted elsewhere 404s here; fall through and create it.
-        updated = await updateAgentDraft(editing.id, agentName, agentType, [...keywords], location.trim(), traits, [...activeToggles]).catch(() => null)
+        updated = await updateAgentDraft(editing.id, agentName, agentType, [...keywords], location.trim(), traits, [...activeToggles], extras).catch(() => null)
       }
-      const entry = updated ?? await createAgentDraft(agentName, agentType, [...keywords], location.trim(), traits, [...activeToggles])
+      const entry = updated ?? await createAgentDraft(agentName, agentType, [...keywords], location.trim(), traits, [...activeToggles], extras)
       setEditing({ kind: 'draft', id: entry.id })
       setDrafts(prev => [
         entry,
@@ -1100,6 +1310,7 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
       factor_location: factorLocation,
       active_toggles: [...activeToggles],
       active_traits: [...selectedTraits],
+      deliverables: chosenDeliverables.length > 0 ? chosenDeliverables : chat.agentConfig.deliverables,
     }
     setSavedChats(saveChat({ ...chat, agentName, agentConfig, savedAt: Date.now() }))
     setOpenSavedSections(prev => ({ ...prev, chats: true }))
@@ -1113,8 +1324,11 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
     setEditing({ kind: 'draft', id: d.id })
     const type = d.agentType ?? 'research'
     setAgentType(type)
-    setFactorLocation(type === 'job_search')
-    setKeywords([...d.keywords])
+    setFactorLocation(d.factorLocation ?? type === 'job_search')
+    setRestoredOutputs(d.outputs && d.outputs.length > 0
+      ? d.outputs.map(kind => ({ kind, title: RELIC_LABELS[kind] ?? kind }))
+      : null)
+    setKeywords(d.keywords.slice(0, MAX_SPECIALTIES))
     setDraft('')
     if (d.location) setLocation(d.location)
     const toggles = [...(d.behaviorToggles ?? [])]
@@ -1128,8 +1342,40 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
     if (toggles.length > 0) setSpecialInstructionsOpen(true)
     if (traitIds.length > 0) setPersonalityOpen(true)
     onAgentNameChange(d.agentName)
-    setFocusPanel('setup')
+    setDossierOpen(false)
+    setPoolOpen(false)
+    setSetupStep('focus')
     inputRef.current?.focus()
+  }
+
+  // Opens the agent already built from this profile, as resuming a job does
+  // but with a fresh conversation: no brief, no bootstrap.
+  function launchDraft(d: AgentDraft) {
+    if (bootstrapping || !d.builtConfig) return
+    setPoolOpen(false)
+    onResumeChat({
+      id: crypto.randomUUID(),
+      agentName: d.agentName,
+      agentConfig: d.builtConfig,
+      messages: [],
+      savedAt: Date.now(),
+    })
+  }
+
+  // Keeps every freshly built agent in the pool, on the profile it was
+  // loaded from or as a new one, so reloading it later skips the build.
+  // Best effort: a failed save only means the next Deploy builds again.
+  function rememberBuild(built: AgentConfig) {
+    const traits = (PERSONALITY_TRAITS[agentType] ?? PERSONALITY_TRAITS.research)
+      .filter(t => selectedTraits.includes(t.id)).map(t => t.label)
+    const extras = { factorLocation, outputs: chosenDeliverables.map(d => d.kind), builtConfig: built }
+    const create = () => createAgentDraft(agentName, agentType, [...keywords], location.trim(), traits, [...activeToggles], extras)
+    const save = editing?.kind === 'draft'
+      ? updateAgentDraft(editing.id, agentName, agentType, [...keywords], location.trim(), traits, [...activeToggles], extras).catch(create)
+      : create()
+    save
+      .then(entry => setDrafts(prev => [entry, ...prev.filter(d => d.id !== entry.id)]))
+      .catch(() => {})
   }
 
   function deleteDraft(id: string) {
@@ -1171,9 +1417,12 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
     // The job's own choice if it recorded one, else the type's default:
     // older configs all carry a location, so "has a location" isn't a signal.
     setFactorLocation(cfg.factor_location ?? (cfg.template ?? 'general') === 'job_search')
-    setKeywords([...(cfg.keywords ?? [])])
+    setKeywords((cfg.keywords ?? []).slice(0, MAX_SPECIALTIES))
     setDraft('')
     if (cfg.location) setLocation(cfg.location)
+    setRestoredOutputs(cfg.deliverables && cfg.deliverables.length > 0
+      ? cfg.deliverables.map(({ kind, title }) => ({ kind, title }))
+      : null)
     const toggles = [...(cfg.active_toggles ?? [])]
     const traits = [...(cfg.active_traits ?? [])]
     setActiveToggles(toggles)
@@ -1193,7 +1442,9 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
     if (bootstrapping) return
     setEditing({ kind: 'chat', id: chat.id })
     applyAgentConfigToForm(chat.agentConfig, chat.agentName)
-    setFocusPanel('setup')
+    setDossierOpen(false)
+    setPoolOpen(false)
+    setSetupStep('focus')
     inputRef.current?.focus()
   }
 
@@ -1273,20 +1524,35 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
       setCommissionHint('Add at least one focus area above — the brief needs it before this agent can be commissioned.')
       return
     }
+    if (reusableConfig) {
+      onStart()
+      onDone({
+        ...reusableConfig,
+        provider,
+        ollama_model: provider === 'ollama' || provider === 'cloudflare' ? activeModel : null,
+        max_delegations: maxDelegations,
+        search_defaults: searchDefaults,
+      })
+      return
+    }
     const loc = usedLocation
     const activeInstructions = BEHAVIOR_TOGGLES.filter(t => activeToggles.includes(t.id)).map(t => t.instruction)
     const traitPool = PERSONALITY_TRAITS[agentType] ?? PERSONALITY_TRAITS.research
     const traitInstructions = traitPool.filter(t => selectedTraits.includes(t.id)).map(t => t.instruction)
     const purpose = getTemplate(agentType).buildPurpose(keywords, loc) +
       (activeInstructions.length > 0 ? ` ${activeInstructions.join(' ')}` : '') +
-      (traitInstructions.length > 0 ? ` ${traitInstructions.join(' ')}` : '')
+      (traitInstructions.length > 0 ? ` ${traitInstructions.join(' ')}` : '') +
+      (chosenDeliverables.length > 0
+        ? ` The user wants these finished outputs from this job: ${chosenDeliverables.map(d => `${d.title} (${RELIC_LABELS[d.kind]})`).join('; ')}.`
+        : '')
     onStart()
     setProgress(null)
-    setToolsSoFar([])
     setModelInfo(null)
+    setDeployRun(EMPTY_DEPLOY_RUN)
     function handleProgress(event: BootstrapStreamEvent) {
+      setDeployRun(run => applyDeployEvent(run ?? EMPTY_DEPLOY_RUN, event,
+        e => formatModelInfo({ used: e.used, failed: e.failed })))
       if (event.type === 'status') setProgress(event.message)
-      else if (event.type === 'tool') setToolsSoFar(prev => [...prev, event.name])
       else if (event.type === 'model') setModelInfo({ used: event.used, failed: event.failed })
     }
     const controller = new AbortController()
@@ -1302,7 +1568,7 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
         purposeImage,
         DEFAULT_AGENT_SPEC,
       )
-      onDone({
+      const built: AgentConfig = {
         ...config,
         keywords,
         location: loc,
@@ -1311,6 +1577,7 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
         ollama_model: provider === 'ollama' || provider === 'cloudflare' ? activeModel : null,
         template: agentType,
         max_delegations: maxDelegations,
+        deliverables: chosenDeliverables.length > 0 ? chosenDeliverables : undefined,
         search_defaults: searchDefaults,
         active_toggles: activeToggles,
         // Only the ids that actually belong to this type's pool — selectedTraits
@@ -1318,8 +1585,12 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
         // this session (no longer pruned on type change), which must not leak
         // into a persisted/resumable AgentConfig.
         active_traits: traitPool.filter(t => selectedTraits.includes(t.id)).map(t => t.id),
-      })
+      }
+      rememberBuild(built)
+      onDone(built)
     } catch (err) {
+      const message = err instanceof Error && err.name === 'AbortError' ? 'Cancelled' : err instanceof Error ? err.message : 'Unknown error'
+      setDeployRun(run => (run ? { ...run, error: run.error ?? message } : run))
       if (err instanceof Error && err.name === 'AbortError') {
         onError('Bootstrap cancelled.')
       } else {
@@ -1353,7 +1624,7 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
     // The model's own note wins; with none (or a disclaimer the backend
     // dropped) the code-checked facts — topic count over the worker limit,
     // missing job-search location — still show.
-    : aiBrief?.warning ?? buildDeterministicWarning(keywords, agentType, usedLocation, maxDelegations)
+    : aiBrief?.warning ?? buildDeterministicWarning(keywords, agentType, factorLocation ? usedLocation : null, maxDelegations)
 
   // The brief in prose. Under the brief graph it sits in its own collapsible
   // "Written brief for Agent" section; without a graph it shows as before.
@@ -1373,52 +1644,6 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
   return (
     <div className={styles.container}>
       <div className={styles.card}>
-        <div className={styles.topIconRow}>
-          <button
-            type="button"
-            className={styles.topIconBtn}
-            onClick={() => setThemePickerOpen(true)}
-            disabled={bootstrapping}
-            aria-haspopup="dialog"
-            aria-label="Theme colors"
-            title="Theme colors"
-          >
-            ◐
-          </button>
-          <button
-            type="button"
-            className={styles.topIconBtn}
-            onClick={() => setStableModalOpen(true)}
-            disabled={bootstrapping}
-            aria-haspopup="dialog"
-            aria-label="Agents"
-            title="Agents"
-          >
-            ♞
-          </button>
-          <button
-            type="button"
-            className={styles.topIconBtn}
-            onClick={() => setScoreboardOpen(true)}
-            disabled={bootstrapping}
-            aria-haspopup="dialog"
-            aria-label="Scoreboard"
-            title="Scoreboard"
-          >
-            ▤
-          </button>
-          <button
-            type="button"
-            className={styles.topIconBtn}
-            onClick={() => setSettingsOpen(true)}
-            disabled={bootstrapping}
-            aria-haspopup="dialog"
-            aria-label="Settings"
-            title="Settings"
-          >
-            ⚙
-          </button>
-        </div>
         <button
           type="button"
           className={styles.brandLogoBtn}
@@ -1430,77 +1655,180 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
         </button>
 
         <div className={styles.focusStack}>
-        <div
-          className={`${styles.agentCard} ${focusPanel === 'setup' ? styles.panelActive : styles.panelCollapsed}`}
-          onPointerDown={handlePanelPointerDown}
-          onClick={e => handlePanelTap('setup', e)}
-        >
+        <div className={styles.agentCard}>
           <div className={styles.agentCardFields}>
-          <div className={`${styles.agentCardFieldsContent} ${bootstrapping ? styles.agentCardFieldsHidden : ''}`}>
-          <div className={styles.agentCardMain}>
-            <div className={styles.agentCardInfo}>
-              <h1 className={styles.title}>Agent {agentName}</h1>
-              <p className={`${styles.locationLiner} ${!factorLocation ? styles.locationLinerOff : ''}`}>
-                {location ? (factorLocation ? location : `${location} · not used`) : 'No location set'}
-              </p>
+          <div className={styles.agentCardFieldsContent}>
+          <div className={`${ah.header} ${styles.agentCardMain}`}>
+            {/* The agent's header, shared with Chat (AgentHeader.module.css):
+                row 1 is the name and model, row 2 the action strip (agent
+                controls left, location right). Save is always shown. */}
+            <div className={ah.identity}>
+              <h1 className={ah.name}>Agent {agentName}</h1>
+              <div className={ah.meta}>
+                <button
+                  type="button"
+                  className={ah.metaItem}
+                  onClick={ev => { ev.stopPropagation(); setSettingsOpen(true) }}
+                  title={describeModelFallback(provider)}
+                >
+                  <span aria-hidden="true">🧠</span>
+                  <span>{describeModel(provider, activeModel)}</span>
+                </button>
+              </div>
+            </div>
+            <div className={ah.actions}>
+              <div className={ah.group} role="group" aria-label="Agent controls">
+                <button
+                  type="button"
+                  className={`${ah.btn} ${ah.btnText} ${poolOpen ? ah.btnOpen : ''}`}
+                  onClick={ev => { ev.stopPropagation(); setPoolOpen(o => !o) }}
+                  disabled={bootstrapping}
+                  aria-expanded={poolOpen}
+                  aria-controls="agent-pool-panel"
+                  title={`Load a previous agent: ${drafts.length + visibleChats.length} saved`}
+                  aria-label={`Load a previous agent (${drafts.length + visibleChats.length} saved)`}
+                >
+                  <AgentPoolIcon />
+                  <span>Load Agent</span>
+                </button>
+                <button
+                  type="button"
+                  className={ah.btn}
+                  onClick={saveAgentDraft}
+                  disabled={bootstrapping}
+                  title="Save Agent profile — name, type, location and focus areas"
+                  aria-label="Save agent"
+                >
+                  <SaveIcon />
+                </button>
+                <button
+                  type="button"
+                  className={ah.btn}
+                  onClick={ev => { ev.stopPropagation(); setCharacterGenOpen(true) }}
+                  disabled={bootstrapping}
+                  title="Open Agent: generate a character"
+                  aria-label="Open agent"
+                >
+                  <OpenAgentIcon />
+                </button>
+                {onOpenAdvanced && (
+                  <button
+                    type="button"
+                    className={ah.btn}
+                    onClick={ev => { ev.stopPropagation(); onOpenAdvanced() }}
+                    disabled={bootstrapping}
+                    title="Advanced: define the agent with a structured spec, hard tool limits and a review step"
+                    aria-label="Advanced setup"
+                  >
+                    <AdvancedIcon />
+                  </button>
+                )}
+              </div>
+            <div className={`${styles.locationMap} ${!factorLocation ? styles.locationMapOff : ''}`}>
               <button
                 type="button"
-                className={styles.modelLiner}
-                onClick={ev => { ev.stopPropagation(); setSettingsOpen(true) }}
-                title={describeModelFallback(provider)}
+                className={styles.locationMapPlace}
+                onClick={() => setLocationMapOpen(true)}
+                disabled={bootstrapping}
+                title="Change the search location on a map"
+                aria-haspopup="dialog"
               >
-                <span className={styles.modelLinerIcon} aria-hidden="true">🧠</span>
-                <span>{describeModel(provider, activeModel)}</span>
+                <svg className={styles.locationMapPin} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z" />
+                  <circle cx="12" cy="9.5" r="2.5" />
+                </svg>
+                <span className={styles.locationMapName}>{location || 'No location set'}</span>
               </button>
-            </div>
-            <div className={styles.agentTypeSelector}>
-              <span className={styles.agentTypeCaption}>Case type</span>
-              <div className={styles.agentTypePills} role="radiogroup" aria-label="Agent type">
-                {AGENT_TEMPLATES.map(t => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={agentType === t.id}
-                    aria-label={t.label}
-                    title={t.label}
-                    className={`${styles.agentTypePill} ${agentType === t.id ? styles.agentTypePillActive : ''}`}
-                    onClick={() => handleAgentTypeChange(t.id)}
-                    disabled={bootstrapping}
-                  >
-                    <span className={styles.agentTypePillIcon} aria-hidden="true">
-                      <AgentTypeIcon id={t.id} />
-                    </span>
-                  </button>
-                ))}
-              </div>
-              <span className={styles.agentTypeLabel}>{getTemplate(agentType).label}</span>
-              <label
-                className={styles.locationToggle}
+              {/* Factor in location: a small tickbox at the card's right. */}
+              <input
+                type="checkbox"
+                className={styles.locationMapToggle}
+                checked={factorLocation}
+                onChange={ev => setFactorLocation(ev.target.checked)}
+                disabled={bootstrapping}
+                aria-label="Factor in location"
                 title={factorLocation
-                  ? 'The location is passed to the agent, which applies it only to location-dependent topics'
-                  : 'The location is not passed to the agent at all'}
-              >
-                <input
-                  type="checkbox"
-                  checked={factorLocation}
-                  onChange={ev => setFactorLocation(ev.target.checked)}
-                  disabled={bootstrapping}
-                />
-                <span>Factor in location</span>
-              </label>
+                  ? 'Factor in location: on. The location is passed to the agent, which applies it only to location-dependent topics.'
+                  : 'Factor in location: off. The location is not passed to the agent at all.'}
+              />
+            </div>
             </div>
           </div>
 
           {/* Tabs sit outside the scrolling body so they stay put while
               the selected view scrolls. */}
           <div className={styles.setupTabsWrap}>
-          <SetupTabs active={setupTab} onSelect={setSetupTab} />
-          <div className={styles.agentCardBody}>
-          {setupTab === 'builder' && (
-          <div className={styles.setupPanel} role="tabpanel" id="setup-panel-builder" aria-labelledby="setup-tab-builder">
+          {/* "Build your agent": the step breadcrumbs and the process graph
+              in one panel. Outside the bootstrap shield, so it stays live
+              while deploying. */}
+          <div className={`${styles.processGraphWrap} ${styles.processGraphPanel}`}>
+            <SectionHeader
+              label="Build your agent"
+              expanded={processGraphOpen}
+              onToggle={() => setProcessGraphOpen(o => !o)}
+              help="The four steps, then a graph of what the agent has done so far and what it's doing now: each step, then each stage of building the agent when you deploy it. Click a step, or its node in the graph, to open it. The toggle hides just the graph."
+            />
+          <SetupSteps
+            active={setupStep}
+            onSelect={setSetupStep}
+          />
+            {/* While deploying, just the deploy stages, so the live ones
+                aren't scrolled off to the right of the Setup steps. */}
+            {processGraphOpen && (
+              <ProcessGraph
+                columns={bootstrapping ? deployOnlyColumns : processColumns}
+                label={bootstrapping ? 'Deploy graph' : 'Build your agent'}
+                onSelect={bootstrapping ? undefined : id => {
+                  const step = SETUP_STEPS.find(s => s.id === id)
+                  if (step) setSetupStep(step.id)
+                }}
+              />
+            )}
+          </div>
+
+          {/* The step's working panel. While deploying, the shield covers
+              just this, so the breadcrumbs and process graph stay in view. */}
+          <div className={`${styles.stepArea} ${bootstrapping ? styles.stepAreaBusy : ''}`}>
+          <div className={`${styles.agentCardBody} ${bootstrapping ? styles.agentCardFieldsHidden : ''}`}>
+          {setupStep === 'character' && (
+          <div className={styles.setupPanel} role="region" id="setup-panel-character" aria-labelledby="setup-step-character">
           <div className={styles.agentCardScroll}>
             <div className={styles.traitsPanel}>
+            {/* Type: the one choice on this step that isn't optional. */}
+            <div className={styles.specialInstructionsRow}>
+              <SectionHeader
+                label="Type"
+                expanded={typeOpen}
+                onToggle={() => setTypeOpen(o => !o)}
+                help="Type: what kind of agent this is. Required, one of these. It sets the brief's template and which personality traits are on offer below."
+                right={!typeOpen && (
+                  <span className={styles.fieldLabelCount}>{getTemplate(agentType).label}</span>
+                )}
+              />
+              {typeOpen && (
+                <div className={styles.behaviorIconRow} role="radiogroup" aria-label="Agent type">
+                  {AGENT_TEMPLATES.map(t => {
+                    const active = agentType === t.id
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={active}
+                        className={active ? styles.behaviorIconBtnActive : styles.behaviorIconBtn}
+                        onClick={() => handleAgentTypeChange(t.id)}
+                        disabled={bootstrapping}
+                        title={t.label}
+                      >
+                        <span className={styles.behaviorIconGlyph} aria-hidden="true"><AgentTypeIcon id={t.id} /></span>
+                        <span className={styles.behaviorIconLabel}>{t.label}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
             <div className={styles.personalityRow}>
               {(() => {
                 // selectedTraits can carry ids from a previously-selected
@@ -1517,7 +1845,7 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
                       label="Personality (Optional)"
                       expanded={personalityOpen}
                       onToggle={() => setPersonalityOpen(o => !o)}
-                      help="Personality traits give the agent a consistent character quirk beyond its raw behavior — e.g. Inquisitive or Meticulous for a researcher. Purely optional flavor that still shapes its generated system prompt, and the pool of traits on offer changes with the agent type (top right). Active traits are summarized in the Brief below."
+                      help="Personality traits give the agent a consistent character quirk beyond its raw behavior — e.g. Inquisitive or Meticulous for a researcher. Purely optional flavor that still shapes its generated system prompt, and the pool of traits on offer changes with the Type above. Active traits are summarized in the Brief below."
                       count={activeTraits.length}
                     />
                     {personalityOpen && (
@@ -1597,7 +1925,13 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
               )}
             </div>
             </div>
+          </div>
+          </div>
+          )}
 
+          {setupStep === 'focus' && (
+          <div className={styles.setupPanel} role="region" id="setup-panel-focus" aria-labelledby="setup-step-focus">
+          <div className={styles.agentCardScroll}>
             <div className={styles.specialtiesRow}>
               <SectionHeader
                 label="Focus"
@@ -1610,7 +1944,7 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
                 <p className={styles.specialtiesHint}>
                   {keywords.length >= MAX_SPECIALTIES
                     ? `Limit of ${MAX_SPECIALTIES} reached — remove one to add another.`
-                    : 'Focus keywords define the Agent job - they act like a search.\nType a keyword and press Enter, or select a Saved Focus item from the Agent Dossier below'}
+                    : 'Focus keywords define the Agent job - they act like a search.\nType a keyword and press Enter, or pick from your Saved Focus below'}
                 </p>
               )}
               {specialtiesOpen && (
@@ -1666,15 +2000,18 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
                   </button>
                 </div>
               )}
-              {specialtiesOpen && (
+              {/* Always mounted: the paperclip in the Focus field opens it. */}
+              <input
+                ref={purposeImageInputRef}
+                type="file"
+                accept="image/*"
+                className={styles.hiddenFileInput}
+                onChange={handlePurposeImageFileChange}
+              />
+              {/* The rows below only render with content, so an empty one
+                  doesn't leave a gap above the info line. */}
+              {specialtiesOpen && (purposeImage || attachingPurposeImage) && (
                 <div className={styles.purposeImageRow}>
-                  <input
-                    ref={purposeImageInputRef}
-                    type="file"
-                    accept="image/*"
-                    className={styles.hiddenFileInput}
-                    onChange={handlePurposeImageFileChange}
-                  />
                   <div className={styles.purposeImageLeft}>
                     {(purposeImage || attachingPurposeImage) && (
                       <div className={styles.purposeImageChip}>
@@ -1699,7 +2036,7 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
                   </div>
                 </div>
               )}
-              {specialtiesOpen && (
+              {specialtiesOpen && (saveFeedback || draft.length > 0) && (
                 <div className={styles.specialtiesActionsRow}>
                   {saveFeedback ? (
                     <p className={`${styles.saveFeedbackText} ${saveFeedback.includes('failed') ? styles.saveFeedbackError : styles.saveFeedbackSuccess}`}>
@@ -1712,6 +2049,131 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
                   )}
                 </div>
               )}
+              {specialtiesOpen && (() => {
+                // One worker per focus topic, up to the per-turn limit
+                // (Settings), so going past it changes what the agent does.
+                const limit = maxDelegations ?? DEFAULT_MAX_DELEGATIONS
+                if (keywords.length > limit) {
+                  return (
+                    <div className={styles.focusWarnBox} role="alert">
+                      <p className={styles.briefNoteText}>
+                        <span className={styles.focusWarnIcon} aria-hidden="true">⚠</span>{' '}
+                        {keywords.length} focus topics, but the agent runs at most {limit} worker agents per research turn,
+                        so some topics will be combined or left for a follow-up turn, and the brief gets broader.
+                        Keep to {limit} for the sharpest results, or raise the worker limit in Settings.
+                      </p>
+                    </div>
+                  )
+                }
+                return (
+                  <div className={styles.briefNoteBox} role="note">
+                    <p className={styles.briefNoteText}>
+                      <span className={styles.briefNoteIcon} aria-hidden="true">i</span>{' '}
+                      {keywords.length === limit
+                        ? `That's ${limit} focus topics, the most the agent covers with a worker each per turn. Adding more works, but some topics will share a worker.`
+                        : `Up to ${limit} focus topics each get their own worker agent per turn (Settings). Fewer, sharper topics give a more focused brief.`}
+                    </p>
+                  </div>
+                )
+              })()}
+              {specialtiesOpen && focusOverlaps.map(o => (
+                <div key={`${o.a}|${o.b}`} className={styles.focusWarnBox} role="note">
+                  <p className={styles.briefNoteText}>
+                    <span className={styles.focusWarnIcon} aria-hidden="true">⚠</span>{' '}
+                    “{shortFocus(o.a)}” and “{shortFocus(o.b)}” mean nearly the same thing, so two workers would cover the same ground.{' '}
+                    <button
+                      type="button"
+                      className={styles.focusInlineAction}
+                      onClick={() => removeKeyword(o.b)}
+                      disabled={bootstrapping}
+                    >
+                      Remove “{shortFocus(o.b)}”
+                    </button>
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            {/* The Saved Focus pool from the Agent Dossier, so focus can be
+                picked here without leaving the step. Renaming, deleting and
+                adding to the pool stay in the Dossier. */}
+            <div className={styles.focusPoolRow}>
+              <SectionHeader
+                label="Saved Focus"
+                count={savedKeywordPool.length}
+                expanded={savedFocusOpen}
+                onToggle={() => setSavedFocusOpen(o => !o)}
+                help="Focus items you've saved for reuse across agents. Tap one to add it to this agent's focus, or tap it again to take it off. Renaming and adding to the pool are in the Agent Dossier."
+              />
+              {savedFocusOpen && (<>
+              {focusRelated.length > 0 && (
+                <h4 className={styles.focusSubheading}>Related to your focus</h4>
+              )}
+              {focusRelated.length > 0 && (
+                <div className={styles.focusRelatedRow}>
+                  {focusRelated.map(r => {
+                    const atCap = keywords.length >= MAX_SPECIALTIES
+                    return (
+                      <button
+                        key={r.topic}
+                        type="button"
+                        className={`${styles.savedKeywordChip} ${atCap ? styles.savedKeywordChipDisabled : ''}`}
+                        onClick={() => addSavedKeyword(r.topic)}
+                        disabled={bootstrapping || atCap}
+                        title={atCap ? `Limit of ${MAX_SPECIALTIES} focus areas reached` : `Close to “${r.near}”. Tap to add`}
+                      >
+                        <span className={styles.savedKeywordLabel}>+ {shortFocus(r.topic)}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+              {focusRelated.length > 0 && savedKeywordPool.length > 0 && (
+                <h4 className={styles.focusSubheading}>Other</h4>
+              )}
+              {savedKeywordPool.length === 0 ? (
+                <p className={styles.briefPlaceholderText}>
+                  <span className={styles.briefPlaceholderIcon} aria-hidden="true">✎</span>
+                  No focus items saved yet. Save the ones above to reuse them on other agents.
+                </p>
+              ) : (
+                <div className={styles.savedKeywordPool}>
+                  {savedKeywordPool.map(kw => {
+                    const alreadyAdded = keywords.some(k => k.toLowerCase() === kw.toLowerCase())
+                    const atCap = !alreadyAdded && keywords.length >= MAX_SPECIALTIES
+                    const toggle = () => { if (bootstrapping || atCap) return; if (alreadyAdded) removeKeyword(kw); else addSavedKeyword(kw) }
+                    // A div, not a button, so the delete button can sit inside it.
+                    return (
+                      <div
+                        key={kw}
+                        className={`${styles.savedKeywordChip} ${alreadyAdded ? styles.savedKeywordChipAdded : ''} ${atCap ? styles.savedKeywordChipDisabled : ''}`}
+                        role="button"
+                        tabIndex={bootstrapping || atCap ? -1 : 0}
+                        onClick={toggle}
+                        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
+                        aria-pressed={alreadyAdded}
+                        aria-disabled={bootstrapping || atCap}
+                        title={alreadyAdded ? 'Tap to remove from this agent\'s focus' : atCap ? `Limit of ${MAX_SPECIALTIES} focus areas reached` : 'Tap to add to this agent\'s focus'}
+                      >
+                        <span className={styles.savedKeywordLabel} title={kw.length > MAX_FOCUS_CHARS ? kw : undefined}>
+                          {shortFocus(kw)}
+                        </span>
+                        <button
+                          type="button"
+                          className={styles.savedKeywordDelete}
+                          onClick={ev => { ev.stopPropagation(); deleteSavedKeyword(kw) }}
+                          disabled={bootstrapping}
+                          aria-label={`Delete saved focus area ${kw}`}
+                          title="Delete saved focus area"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              </>)}
             </div>
 
           </div>
@@ -1720,10 +2182,10 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
 
           {/* Brief: generated from the builder fields, never typed into
               directly, so it reads as assembled output rather than another
-              field to fill in. It keeps drafting while the builder tab is
+              field to fill in. It keeps drafting while the other steps are
               showing. */}
-          {setupTab === 'brief' && (
-          <div className={`${styles.setupPanel} ${styles.setupPanelSecond} ${styles.briefSection}`} role="tabpanel" id="setup-panel-brief" aria-labelledby="setup-tab-brief">
+          {setupStep === 'brief' && (
+          <div className={`${styles.setupPanel} ${styles.briefSection}`} role="region" id="setup-panel-brief" aria-labelledby="setup-step-brief">
             {keywords.length === 0 ? (
                 <p className={styles.briefPlaceholderText}>
                   <span className={styles.briefPlaceholderIcon} aria-hidden="true">✎</span>
@@ -1754,7 +2216,7 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
                   </div>
                   {briefWarning && (
                     <div className={styles.briefNoteBox} role="note">
-                      <p className={styles.briefNoteText}><span className={styles.briefNoteIcon} aria-hidden="true">ℹ</span> {briefWarning}</p>
+                      <p className={styles.briefNoteText}><span className={styles.briefNoteIcon} aria-hidden="true">i</span> {briefWarning}</p>
                     </div>
                   )}
                 </>
@@ -1769,7 +2231,7 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
                         onToggle={() => setBriefGraphOpen(o => !o)}
                         help="The brief drawn as a flow: what you asked for, how the agent understood it, the lines of work it will split into, and what it hands back."
                       />
-                      {briefGraphOpen && briefMap && <BriefGraph map={briefMap} />}
+                      {briefGraphOpen && briefMap && <BriefGraph map={briefMap} focuses={keywords} />}
                       {briefGraphOpen && !briefMap && !briefLoading && (
                         <p className={styles.briefMapDrawing} role="status">
                           <span className={styles.briefUpdatingSpinner} aria-hidden="true" />
@@ -1790,7 +2252,10 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
                     </div>
                   ) : briefTextEl}
                   {!aiBrief && briefError && !briefLoading && (
-                    <p className={styles.briefLoadingHint}>Showing the basic brief: the AI brief couldn't be drafted ({briefError}).</p>
+                    <p className={`${styles.focusWarnBox} ${styles.briefFallbackNote}`} role="status">
+                      <span className={styles.focusWarnIcon} aria-hidden="true">⚠</span>{' '}
+                      Showing the basic brief: the AI brief couldn't be drafted ({briefError}).
+                    </p>
                   )}
                   {briefLoading && (
                     <div className={styles.briefUpdating} role="status">
@@ -1801,7 +2266,7 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
                   </div>
                   {briefWarning && (
                     <div className={styles.briefNoteBox} role="note">
-                      <p className={styles.briefNoteText}><span className={styles.briefNoteIcon} aria-hidden="true">ℹ</span> {briefWarning}</p>
+                      <p className={styles.briefNoteText}><span className={styles.briefNoteIcon} aria-hidden="true">i</span> {briefWarning}</p>
                     </div>
                   )}
                   {briefRelicError && !briefRelicPreview && (
@@ -1811,10 +2276,64 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
               )}
           </div>
           )}
-          </div>
-          </div>
-          </div>
 
+          {/* Outputs: the deliverables the agent proposes for this job,
+              its own picks pre-ticked. Chosen ones go on the AgentConfig
+              (deliverables) and are offered after every research turn. */}
+          {setupStep === 'outputs' && (
+          <div className={styles.setupPanel} role="region" id="setup-panel-outputs" aria-labelledby="setup-step-outputs">
+            {keywords.length === 0 ? (
+              <p className={styles.briefPlaceholderText}>
+                <span className={styles.briefPlaceholderIcon} aria-hidden="true">✎</span>
+                Add Focus first: the agent proposes outputs for the job it's been given.
+              </p>
+            ) : outputsLoading || ((briefLoading || briefScheduled) && !outputProposals) ? (
+              <div className={`${styles.briefUpdating} ${styles.outputsUpdating}`} role="status">
+                <span className={styles.briefUpdatingSpinner} aria-hidden="true" />
+                <span>{briefLoading || briefScheduled ? 'Waiting for the new brief…' : 'Proposing outputs for this job…'}</span>
+              </div>
+            ) : (
+              <>
+                <p className={styles.outputsIntro}>
+                  {outputsFailed
+                    ? "Couldn't get the agent's proposals, so pick the kinds of output you want by hand."
+                    : 'What this agent proposes to hand back. Its picks are ticked; change them freely.'}
+                </p>
+                <ul className={styles.outputList}>
+                  {outputOptions.map(o => {
+                    const on = chosenOutputs.includes(o.kind)
+                    return (
+                      <li key={o.kind}>
+                        <label className={`${styles.outputCard} ${on ? styles.outputCardOn : ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            onChange={() => toggleOutput(o.kind)}
+                            disabled={bootstrapping}
+                          />
+                          <span className={styles.outputIcon}><RelicIcon kind={o.kind} /></span>
+                          <span className={styles.outputText}>
+                            <span className={styles.outputTitle}>
+                              {o.title}
+                              {o.recommended && <span className={styles.outputPick}>agent's pick</span>}
+                            </span>
+                            <span className={styles.outputMeta}>
+                              {RELIC_LABELS[o.kind]}{o.reason ? ` · ${o.reason}` : ''}
+                            </span>
+                          </span>
+                        </label>
+                      </li>
+                    )
+                  })}
+                </ul>
+                {chosenOutputs.length === 0 && (
+                  <p className={styles.briefLoadingHint}>None chosen: the agent answers in chat and suggests formats as it goes.</p>
+                )}
+              </>
+            )}
+          </div>
+          )}
+          </div>
           {bootstrapping && (
             <div className={styles.bootstrapShield}>
               <button
@@ -1840,72 +2359,21 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
                 {modelInfo ? formatModelInfo(modelInfo) : describeModel(provider, activeModel)}
                 {' · '}{bootstrapElapsed}s elapsed
               </p>
-              {toolsSoFar.length > 0 && (
-                <ul className={styles.bootstrapShieldTools}>
-                  {toolsSoFar.map(name => (
-                    <li key={name}>✓ {name}</li>
-                  ))}
-                </ul>
-              )}
             </div>
           )}
           </div>
+          </div>
+          </div>
+          </div>
 
+          {/* Save toolbar and Deploy share one row. */}
+          <div className={styles.saveDeployRow}>
+          {commissionHint && (
+            <p className={styles.commissionHint} role="status">{commissionHint}</p>
+          )}
           <div className={styles.resetToolbar}>
-            {toolbarLayout.visible('controls').map(id => {
-              switch (id) {
-                case 'save':
-                  return (
-                    <button
-                      key={id}
-                      {...toolbarDrag.dragProps(id)}
-                      type="button"
-                      className={`${styles.toolbarIconBtn} ${styles.toolbarControlBtn}`}
-                      onClick={saveAgentDraft}
-                      disabled={bootstrapping}
-                      title="Save Agent profile — name, type, location and focus areas"
-                      aria-label="Save agent"
-                    >
-                      <SaveIcon />
-                    </button>
-                  )
-                case 'open':
-                  return (
-                    <button
-                      key={id}
-                      {...toolbarDrag.dragProps(id)}
-                      type="button"
-                      className={`${styles.toolbarIconBtn} ${styles.toolbarControlBtn}`}
-                      onClick={ev => { ev.stopPropagation(); setCharacterGenOpen(true) }}
-                      disabled={bootstrapping}
-                      title="Open Agent: generate a character"
-                      aria-label="Open agent"
-                    >
-                      <OpenAgentIcon />
-                    </button>
-                  )
-                case 'advanced':
-                  return onOpenAdvanced && (
-                    <button
-                      key={id}
-                      {...toolbarDrag.dragProps(id)}
-                      type="button"
-                      className={`${styles.toolbarIconBtn} ${styles.toolbarControlBtn}`}
-                      onClick={ev => { ev.stopPropagation(); onOpenAdvanced() }}
-                      disabled={bootstrapping}
-                      title="Advanced: define the agent with a structured spec, hard tool limits and a review step"
-                      aria-label="Advanced setup"
-                    >
-                      <AdvancedIcon />
-                    </button>
-                  )
-                default:
-                  return null
-              }
-            })}
             {briefOutputs.length > 0 && (
-              // Output buttons: a different job from the agent controls
-              // beside them, so grouped on their own background.
+              // Output buttons, grouped on their own background.
               <div className={styles.toolbarOutputs} role="group" aria-label="Outputs">
                 {briefOutputs.map(s => {
                   const built = briefRelics.some(r => r.kind === s.kind)
@@ -1947,71 +2415,62 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
                 <ToolsIcon />
               </button>
             )}
-            {/* Clear is destructive, so it sits apart, after the outputs. */}
-            {toolbarLayout.visible('danger').map(id => (
+            <button
+              type="button"
+              className={`${styles.toolbarIconBtn} ${styles.toolbarIsolated}`}
+              onClick={() => setSettingsOpen(true)}
+              disabled={bootstrapping}
+              aria-haspopup="dialog"
+              aria-label="Settings"
+              title="Settings"
+            >
+              <span className={styles.toolbarGlyph} aria-hidden="true">⚙</span>
+            </button>
+            {/* Deploy ends the toolbar: everything for this agent in one bar. */}
+            <button
+              type="submit"
+              form="agentSetupForm"
+              className={`${styles.profileCommissionBtn} ${styles.toolbarDeploy} ${keywords.length === 0 ? styles.profileCommissionBtnBlocked : ''}`}
+              disabled={bootstrapping}
+              aria-disabled={keywords.length === 0}
+              title={reusableConfig
+                ? 'Launch: this agent is already built from these steps, so it opens straight away'
+                : 'Deploy: build the agent from these steps and start the job'}
+            >
+              {bootstrapping ? 'Configuring…' : reusableConfig ? 'Launch >' : 'Deploy >'}
+            </button>
+            {bootstrapping && (
               <button
-                key={id}
                 type="button"
-                className={`${styles.toolbarIconBtn} ${styles.toolbarIconDanger} ${styles.toolbarIsolated}`}
-                onClick={() => {
-                  setEditing(null)
-                  setKeywords([])
-                  setDraft('')
-                  setActiveToggles([])
-                  setSelectedTraits([])
-                  setPurposeImage(null)
-                  onNewAgent()
-                  inputRef.current?.focus()
-                }}
-                disabled={bootstrapping}
-                title="Clear: start a fresh agent"
-                aria-label="Clear"
+                className={styles.bootstrapStopBtn}
+                onClick={stopBootstrap}
+                title="Cancel this in-progress bootstrap"
               >
-                <ClearIcon />
+                Stop
               </button>
-            ))}
+            )}
           </div>
 
-          <div className={styles.profileCommissionRow}>
-              {commissionHint && (
-                <p className={styles.commissionHint} role="status">{commissionHint}</p>
-              )}
-              <div className={styles.commissionGroup}>
-                <HelpTip
-                  text="Agent type (top right, beside the agent's name) decides which primitive tools and default behavior this agent gets — e.g. only a Job search agent can call the live job-listings tool. Switching types also swaps the personality traits on offer above. Deploy bootstraps it and starts the chat."
-                  label="Commission bar help"
-                  direction="up"
-                />
-                <button
-                  type="submit"
-                  form="agentSetupForm"
-                  className={`${styles.profileCommissionBtn} ${keywords.length === 0 ? styles.profileCommissionBtnBlocked : ''}`}
-                  disabled={bootstrapping}
-                  aria-disabled={keywords.length === 0}
-                >
-                  {bootstrapping ? 'Configuring…' : 'Deploy >'}
-                </button>
-                {bootstrapping && (
-                  <button
-                    type="button"
-                    className={styles.bootstrapStopBtn}
-                    onClick={stopBootstrap}
-                    title="Cancel this in-progress bootstrap"
-                  >
-                    Stop
-                  </button>
-                )}
-              </div>
-            </div>
+          </div>
         </div>
 
+        {dossierOpen && (
+          <div className={styles.dossierBackdrop} onClick={() => setDossierOpen(false)} aria-hidden="true" />
+        )}
         <form
           id="agentSetupForm"
           onSubmit={handleSubmit}
-          onPointerDown={handlePanelPointerDown}
-          onClick={e => handlePanelTap('dossier', e)}
-          className={`${styles.form} ${focusPanel === 'dossier' ? styles.panelActive : styles.panelCollapsed}`}
+          className={`${styles.form} ${styles.dossierDrawer} ${dossierOpen ? styles.dossierDrawerOpen : ''}`}
         >
+          <button
+            type="button"
+            className={styles.dossierClose}
+            onClick={() => setDossierOpen(false)}
+            aria-label="Close the Agent Dossier"
+            title="Close"
+          >
+            ×
+          </button>
           <div className={styles.dossierWrap}>
           <div className={styles.savedSectionsScroll}>
           <span className={styles.dossierTab} aria-hidden="true">Agent Dossier</span>
@@ -2415,12 +2874,50 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
         onClose={() => setThemePickerOpen(false)}
       />
 
+      {/* Load a previous agent: a popup from the button by the name. */}
+      {poolOpen && (
+        <div className={styles.agentPoolOverlay} onClick={() => setPoolOpen(false)}>
+          <div
+            id="agent-pool-panel"
+            className={styles.agentPoolPanel}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="agent-pool-title"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className={styles.agentPoolPanelHead}>
+              <h2 id="agent-pool-title" className={styles.agentPoolPanelTitle}>Load a previous agent</h2>
+              <button type="button" className={styles.agentPoolPanelClose} onClick={() => setPoolOpen(false)} aria-label="Close" autoFocus>×</button>
+            </div>
+            <div className={styles.agentPoolPanelBody}>
+              <AgentPool
+                drafts={drafts}
+                chats={visibleChats}
+                formatDate={ts => formatSavedAt(ts, dateFormat)}
+                editing={editing}
+                disabled={bootstrapping}
+                onLoadDraft={loadDraft}
+                onLaunchDraft={launchDraft}
+                onDeleteDraft={deleteDraft}
+                onLoadChatDetails={loadChatDetails}
+                onHideChat={hideChat}
+              />
+            </div>
+          </div>
+        </div>
+      )}
       <AgentStableModal
         isOpen={stableModalOpen}
         onClose={() => setStableModalOpen(false)}
         onHire={hirePublishedAgent}
       />
 
+      <LocationMapModal
+        isOpen={locationMapOpen}
+        location={location}
+        onClose={() => setLocationMapOpen(false)}
+        onSelect={selectLocation}
+      />
       <ScoreboardModal
         isOpen={scoreboardOpen}
         onClose={() => setScoreboardOpen(false)}
@@ -2490,7 +2987,7 @@ export default function Setup({ agentName, onAgentNameChange, onNewAgent, bootst
           setSelectedTraits(character.traitIds)
           setActiveToggles(character.behaviorIds)
           setEditing(null)
-          setKeywords(character.specialties)
+          setKeywords(character.specialties.slice(0, MAX_SPECIALTIES))
         }}
       />
     </div>

@@ -1,0 +1,156 @@
+/* The agent's header, shared by Setup (create) and Chat (deployment) so
+   both read the same: row 1 is the identity (name, then a meta line),
+   row 2 is the action strip (button groups left and right). Each page keeps
+   its own buttons; only the look is shared. */
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem; /* space above the action strip */
+  min-width: 0;
+  padding: 0.6rem 0.75rem 0.25rem;
+  background: var(--color-surface);
+  box-sizing: border-box;
+}
+
+/* Row 1: the name, then its meta items on the same line. */
+.identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.75rem;
+  min-width: 0;
+}
+
+.name {
+  margin: 0;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: var(--font-size-xl);
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.6rem;
+  min-width: 0;
+}
+
+/* One meta item (model, location, time, traits): plain text, no border. */
+.metaItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-accent-secondary, #3f7ea0);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.metaItem svg {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+
+/* A meta item that opens something (Setup's model → Settings). */
+button.metaItem {
+  cursor: pointer;
+}
+
+button.metaItem:hover:not(:disabled),
+button.metaItem:focus-visible {
+  text-decoration: underline;
+}
+
+.metaSep {
+  color: var(--graph-35);
+}
+
+/* Row 2: the action strip. */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--graph-35);
+}
+
+.group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+/* Every action button: same size, border and hover on both pages. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  width: 2.4rem;
+  height: 2.4rem;
+  padding: 0;
+  box-sizing: border-box;
+  background: var(--color-surface);
+  border: 1px solid #e2dfd5;
+  border-radius: var(--radius-control);
+  color: var(--color-accent);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.btn svg {
+  width: 1.2rem;
+  height: 1.2rem;
+  flex-shrink: 0;
+}
+
+.btn:hover:not(:disabled),
+.btnOpen {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: #fff;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* A button with a text label beside its icon. */
+.btnText {
+  width: auto;
+  padding: 0 0.75rem;
+}
+
+.btnText svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+/* The page's one main action in the strip (Chat's New agent). */
+.btnPrimary {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: #fff;
+}
+
+.btnPrimary:hover:not(:disabled) {
+  filter: brightness(1.1);
+}

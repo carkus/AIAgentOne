@@ -38,7 +38,8 @@ import tempfile
 from flask import Flask, Response, jsonify, request, stream_with_context
 from bootstrap import generate_agent_config_stream, validate_config
 from agent_stream import run_agent_stream
-from brief import generate_brief, generate_brief_map
+from brief import generate_brief, generate_brief_map, propose_outputs
+from focus_insights import check_focus
 from recap import generate_recap
 from relic import KINDS, generate_relic
 from llm_client import list_ollama_models, GEMINI_MODEL, CLOUDFLARE_MODELS, cloudflare_configured
@@ -198,6 +199,52 @@ def brief_map():
     return jsonify({"map": result})
 
 
+@app.route("/brief-outputs", methods=["POST", "OPTIONS"])
+def brief_outputs():
+    """Setup's Outputs step: the deliverables the agent proposes for this
+    job. Under the /brief prefix so the nginx and Vite proxies cover it."""
+    if request.method == "OPTIONS":
+        return "", 204
+    body = request.get_json() or {}
+    keywords = [str(k) for k in body.get("keywords") or [] if str(k).strip()] if isinstance(body.get("keywords"), list) else []
+    if not keywords:
+        return jsonify({"error": "keywords are required"}), 400
+    provider = ((body.get("provider") or "").strip() or None)
+    model = ((body.get("ollama_model") or "").strip() or None)
+    if provider != "ollama":
+        rate_limit_error = rate_limit.check(rate_limit.client_ip(request), bucket="brief")
+        if rate_limit_error:
+            return jsonify({"error": rate_limit_error}), 429
+    as_list = lambda v: [str(x) for x in v] if isinstance(v, list) else []
+    outputs = propose_outputs(
+        keywords=keywords,
+        brief_text=str(body.get("brief") or ""),
+        agent_type=body.get("agentType"),
+        traits=as_list(body.get("traits")),
+        behaviors=as_list(body.get("behaviors")),
+        provider=provider,
+        model=model,
+    )
+    if outputs is None:
+        return jsonify({"error": "Could not propose outputs"}), 502
+    return jsonify({"outputs": outputs})
+
+
+@app.route("/brief-focus", methods=["POST", "OPTIONS"])
+def brief_focus():
+    """Smart Focus (focus_insights.py): overlapping chosen topics and related
+    Saved Focus items, by embedding similarity. Embeddings only, no chat
+    call, so it isn't rate-limited; inputs are capped in check_focus."""
+    if request.method == "OPTIONS":
+        return "", 204
+    body = request.get_json() or {}
+    provider = ((body.get("provider") or "").strip() or None)
+    result = check_focus(body.get("keywords"), body.get("pool"), provider)
+    if result is None:
+        return jsonify({"error": "Embeddings unavailable"}), 502
+    return jsonify(result)
+
+
 @app.route("/recap", methods=["POST", "OPTIONS"])
 def recap():
     if request.method == "OPTIONS":
@@ -312,7 +359,7 @@ def agent_drafts_collection():
     location = body.get("location") or ""
     traits = body.get("traits") or []
     behavior_toggles = body.get("behaviorToggles") or []
-    entry = agent_drafts.add_draft(agent_name, agent_type, keywords, location, traits, behavior_toggles)
+    entry = agent_drafts.add_draft(agent_name, agent_type, keywords, location, traits, behavior_toggles, body)
     return jsonify(entry), 201
 
 
@@ -338,6 +385,7 @@ def agent_drafts_item(draft_id):
         body.get("location") or "",
         body.get("traits") or [],
         body.get("behaviorToggles") or [],
+        body,
     )
     if entry is None:
         return jsonify({"error": "Saved agent profile not found"}), 404

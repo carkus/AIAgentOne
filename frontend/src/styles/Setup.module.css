@@ -24,7 +24,7 @@
   background: none;
   border: none;
   padding: 0;
-  margin: -18px 0 0.75rem;
+  margin: 2px 0 0.75rem;
   cursor: pointer;
   line-height: 0;
   opacity: 1;
@@ -220,9 +220,14 @@
   padding-right: 4.5rem;
 }
 
+/* "N chars remaining": the same small mono caption as the app's other
+   labels (.agentTypeCaption, .fieldLabel). */
 .charHint {
-  color: #8a94a0;
-  font-size: var(--font-size-sm);
+  color: var(--color-muted);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   margin: 0;
   text-align: right;
 }
@@ -298,31 +303,8 @@
   text-transform: uppercase;
 }
 
-.locationToggle {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  width: 100%;
-  padding-top: 0.3rem;
-  border-top: 1px solid #e2dfd5;
-  color: #33475a;
-  font-family: inherit;
-  font-size: 0.68rem;
-  cursor: pointer;
-  user-select: none;
-}
 
-.locationToggle input {
-  margin: 0;
-  accent-color: var(--color-accent);
-  cursor: pointer;
-}
 
-.locationToggle input:disabled,
-.locationToggle input:disabled + span {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
 
 .agentTypeLabel {
   color: var(--color-accent);
@@ -463,16 +445,7 @@
   gap: 0.6rem;
 }
 
-.locationLiner {
-  margin: -0.35rem 0 0.15rem;
-  color: var(--color-accent);
-  font-size: 0.7rem;
-  text-align: left;
-}
 
-.locationLinerOff {
-  color: #6b7785;
-}
 
 /* inline-flex + align-items: center (rather than plain text flow) so the
    🧠 glyph stays vertically centered against the label even when a long
@@ -587,19 +560,11 @@
   gap: 0.85rem;
 }
 
+/* The agent's header; its look is AgentHeader.module.css, shared with
+   Chat. This only places it. */
 .agentCardMain {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
   flex-shrink: 0;
-}
-
-.agentCardInfo {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
+  margin: 0 8px 0.2rem 0; /* right edge lines up with the panel below */
 }
 
 .personalityRow {
@@ -762,16 +727,6 @@
 
 /* Save / Open / Advanced: the agent's own controls, a little larger than
    the output and Clear buttons. */
-.toolbarControlBtn {
-  width: 2.4rem;
-  height: 2.4rem;
-}
-
-.toolbarControlBtn svg {
-  width: 1.2rem;
-  height: 1.2rem;
-}
-
 /* Set apart from the other toolbar buttons (Clear, after the outputs). */
 .toolbarIsolated {
   margin-left: 0.75rem;
@@ -966,54 +921,127 @@
   min-height: 0;
 }
 
-.setupTabRow {
+/* Step breadcrumb: Focus › Character › Brief › Outputs. */
+.stepCrumbs {
   display: flex;
-  align-items: flex-end;
-  gap: 0.3rem;
+  align-items: center;
+  gap: 0.35rem;
   flex-shrink: 0;
+  margin-bottom: 0.5rem;
 }
 
-.setupPanelTab {
-  /* Bottom-aligned in the row, so the selected tab's -1px margin overlaps
-     the panel's top border and hides it under the tab. */
-  align-self: flex-end;
-  position: relative;
-  z-index: 1;
+.stepCrumbList {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stepCrumbItem {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  margin-bottom: -1px;
-  background: #fbfdfe;
-  border: 1px solid #cfe3ea;
-  border-bottom: none;
-  border-radius: 7px 7px 0 0;
+  gap: 0.3rem;
+}
+
+.stepCrumbSep {
+  color: #9aa5b1;
+}
+
+.stepCrumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: none;
+  border: none;
+  padding: 0.3rem 0.35rem;
   color: #6b7785;
   cursor: pointer;
+  font: inherit;
   font-family: 'Share Tech Mono', monospace;
   font-size: var(--font-size-base);
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  padding: 0.6rem 0.8rem 0.45rem;
 }
 
-.setupPanelTab:hover {
+.stepCrumb:hover {
   color: var(--color-text);
 }
 
-/* Not selected: sits behind the panel, closing its own bottom edge so the
-   panel's top border runs under it. */
-.setupPanelTabInactive {
-  z-index: 0;
-  /* Shorter than the selected tab, so the selected one stands taller. */
-  padding-top: 0.3rem;
-  border-bottom: 1px solid #cfe3ea;
-  background: transparent;
+.stepCrumbActive {
+  color: var(--color-text);
+  font-weight: 600;
 }
 
-/* The Brief tab isn't at the left edge, so its panel keeps a full top-left
-   corner. */
-.setupPanelSecond {
-  border-radius: 10px;
+.stepCrumbNum {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  /* Sized off the crumb's font, not the digit's, so the digit can shrink
+     inside a circle that stays the same size. */
+  width: calc(var(--font-size-base) * 1.3);
+  height: calc(var(--font-size-base) * 1.3);
+  box-sizing: border-box;
+  border-radius: 50%;
+  background: #cfe3ea;
+  border: 1px solid #3f7ea0;
+  color: #16324a;
+  /* Space Grotesk rather than the crumb's Share Tech Mono: its digits sit
+     on the vertical centre of the line box, the mono font's sit low. */
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 600;
+  font-size: 0.78em;
+  /* The crumb's letter-spacing adds trailing space after the digit, which
+     pushed it left of centre; line-height 1 stops the font's ascent/descent
+     pushing it up or down. */
+  letter-spacing: 0;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.stepCrumbActive .stepCrumbNum {
+  background: var(--color-accent);
+  color: #ffffff;
+}
+
+/* Focus step: over the per-turn worker limit. */
+.focusWarnBox {
+  margin-top: 0.5rem;
+  background: #fef3c7;
+  border-radius: 6px;
+  padding: 0.55rem 0.75rem;
+}
+
+.focusWarnIcon {
+  color: #b45309;
+  font-weight: 600;
+}
+
+/* "Showing the basic brief…" under the brief: the same warning box as the
+   Focus step's, in the smaller status-text size. */
+.briefFallbackNote {
+  margin: 0.5rem 0 0;
+  color: #7c4a12;
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+}
+
+.focusPoolRow {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--color-border);
+}
+
+.focusPoolRow .savedKeywordChip {
+  font: inherit;
+  padding: 0.25rem 0.55rem;
 }
 
 .setupPanel {
@@ -1023,7 +1051,7 @@
   padding: 0.75rem 0.75rem 0.7rem;
   background: #fbfdfe;
   border: 1px solid #cfe3ea;
-  border-radius: 3px 10px 10px 10px;
+  border-radius: 10px;
 }
 
 /* The first section in a panel sits right under the tab, so it drops the
@@ -1072,8 +1100,8 @@
   gap: 0.5rem;
   background: rgba(242, 239, 233, 0.75);
   border-radius: 8px;
-  color: #16324a;
-  font-size: 0.85rem;
+  color: var(--graph-50);
+  font-size: 0.9em;
   font-weight: 500;
 }
 
@@ -1099,9 +1127,9 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin: 0 0 0.35rem;
-  color: #6b7785;
-  font-size: 0.85rem;
+  margin: 0 0 0.175rem;
+  color: var(--graph-50);
+  font-size: 0.9em;
 }
 
 /* "Written brief for Agent": the prose brief, folded under the brief graph. */
@@ -1130,8 +1158,12 @@
 }
 
 .briefLoadingHint {
-  color: #8a8572;
+  color: var(--graph-50);
   font-style: italic;
+  /* Half a paragraph's default 1em top/bottom margin. */
+  margin: 0.5em 0;
+  /* Same size as .outputsIntro: every status line in the steps matches. */
+  font-size: 0.9em;
 }
 
 /* Empty-state hint shown before any Specialty exists — a dashed-border card
@@ -1246,8 +1278,19 @@
 }
 
 .briefNoteIcon {
-  color: #3f7ea0;
-  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 999px;
+  background: #3f7ea0;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-style: normal;
+  line-height: 1;
+  vertical-align: text-bottom;
 }
 
 .specialInstructionsRow {
@@ -1690,7 +1733,7 @@
   padding: 1.6rem 0.9rem 0.6rem 0.7rem;
   background: var(--color-dossier-setup-bg);
   border: 1px solid var(--color-dossier-setup-border);
-  border-radius: 3px 10px 10px 10px;
+  border-radius: 10px;
   box-shadow:
     0 1px 0 var(--color-dossier-setup-shadow-light),
     0 8px 0 -3px var(--color-dossier-setup-shadow-mid),
@@ -2520,7 +2563,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: safe center;
+  overflow-y: auto;
   gap: 0.7rem;
   background: rgba(255, 255, 255, 0.94);
   border: 1px solid var(--color-accent);
@@ -2615,25 +2659,6 @@
   font-family: 'Share Tech Mono', monospace;
   font-size: 0.88rem;
   letter-spacing: 0.02em;
-}
-
-/* Live checklist of tool names as bootstrap.py's stream parses each one out
-   of the growing JSON buffer (toolsSoFar in Setup.tsx) — moved in from the
-   .loadingHint panel below the card so the shield itself shows real,
-   incrementally-arriving process data instead of just a status line. */
-.bootstrapShieldTools {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.2rem;
-  color: var(--color-muted);
-  font-family: 'Share Tech Mono', monospace;
-  font-size: 0.78rem;
-  max-height: 90px;
-  overflow-y: auto;
 }
 
 /* First breakpoint in this file — .commissionGroup's content (label + 3
@@ -2745,3 +2770,466 @@
   transform: scale(0.96);
   transform-origin: center top;
 }
+
+/* Outputs step: the deliverables the agent proposes, one tickable row each. */
+.outputsIntro {
+  margin: 0 0 0.6rem;
+  color: var(--graph-80);
+  font-size: 0.9em;
+}
+
+.outputList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.outputCard {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  cursor: pointer;
+}
+
+.outputCard input {
+  margin: 0.2rem 0 0;
+  accent-color: var(--color-accent);
+}
+
+.outputCardOn {
+  border-color: var(--color-accent);
+}
+
+.outputIcon {
+  flex-shrink: 0;
+  width: 1.25rem;
+  height: 1.25rem;
+  color: var(--color-accent);
+}
+
+.outputIcon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.outputText {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.outputTitle {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.outputPick {
+  margin-left: 0.5rem;
+  color: var(--color-accent);
+  font-size: 0.8em;
+  font-weight: 500;
+}
+
+.outputMeta {
+  color: var(--color-muted);
+  font-size: 0.9em;
+}
+
+/* Smart Focus: an inline fix inside the overlap warning, and the row of
+   Saved Focus items related to the chosen topics. */
+.focusInlineAction {
+  font: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.focusInlineAction:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.focusRelatedRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* Subheadings inside the Saved Focus block: "Related to your focus" and
+   "Other". Quieter than .fieldLabel, which heads the whole block. */
+.focusSubheading {
+  margin: 0.25rem 0 0;
+  color: var(--color-muted);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.focusRelatedRow .savedKeywordChip {
+  font: inherit;
+  padding: 0.25rem 0.55rem;
+}
+
+/* The live process graph: below every step's working panel, above the
+   save toolbar. The right margin lines it up with the form, like
+   .resetToolbar. */
+.processGraphWrap {
+  flex: none;
+  margin: 0.5rem 8px 0 0;
+}
+
+/* The save toolbar and the Deploy group on one row, Deploy at the right
+   end. The right margin is .agentCardBody's scrollbar gutter, as before. */
+.saveDeployRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin: 0.2rem 8px 0 0;
+  flex-shrink: 0;
+}
+
+.saveDeployRow > .resetToolbar,
+.saveDeployRow > .profileCommissionRow {
+  margin: 0;
+  align-self: auto;
+}
+
+/* ---- Natural height: the setup card grows, the page scrolls ----------
+   The setup card no longer shares the screen with the dossier, so nothing
+   inside it scrolls: every wrapper takes its content height and Setup's
+   own container is the one scroller (html/body still never scroll). */
+.container {
+  overflow-y: auto;
+  align-items: flex-start;
+}
+
+.card {
+  height: auto;
+  min-height: 100%;
+  overflow: visible;
+}
+
+.focusStack,
+.focusStack .agentCard,
+.agentCardFields,
+.agentCardFieldsContent,
+.setupTabsWrap,
+.agentCardBody {
+  flex: none;
+  min-height: auto;
+  overflow: visible;
+}
+
+/* ---- Agent Dossier: a manila folder drawer ------------------------------ */
+
+/* The tab at the far end of the steps row. */
+.dossierFolderTab {
+  flex: none;
+  margin-left: auto;
+  align-self: flex-end;
+  background: var(--color-dossier-setup-bg);
+  border: 1px solid var(--color-dossier-setup-border);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  color: var(--color-dossier-text, #6b7785);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: var(--font-size-sm);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.3rem 0.9rem 0.35rem;
+  cursor: pointer;
+  box-shadow: 0 -1px 0 var(--color-dossier-setup-shadow-light) inset;
+}
+
+.dossierFolderTab:hover,
+.dossierFolderTabOpen {
+  border-color: var(--color-dossier-setup-shadow-mid);
+}
+
+/* The folder itself: fixed to the right edge, slid off screen when shut. */
+.focusStack .form.dossierDrawer,
+.form.dossierDrawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(440px, calc(100vw - 32px));
+  z-index: 40;
+  margin: 0;
+  padding: 2.6rem 0.8rem 1rem;
+  box-sizing: border-box;
+  background: var(--color-bg);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+  opacity: 1;
+  transform: translateX(105%);
+  visibility: hidden;
+  transition: transform 0.3s ease, visibility 0s linear 0.3s;
+}
+
+.focusStack .form.dossierDrawerOpen,
+.form.dossierDrawerOpen {
+  transform: translateX(0);
+  visibility: visible;
+  transition: transform 0.3s ease, visibility 0s;
+}
+
+/* Inside the drawer the folder fills the height and its list scrolls. */
+.dossierDrawer .dossierWrap {
+  margin-top: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.dossierClose {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.7rem;
+  z-index: 2;
+  background: none;
+  border: none;
+  color: var(--color-muted);
+  font-size: 1.4rem;
+  line-height: 1;
+  padding: 0.2rem 0.4rem;
+  cursor: pointer;
+}
+
+.dossierClose:hover {
+  color: var(--color-text);
+}
+
+.dossierBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 39;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+/* One toolbar: agent controls, outputs, Clear, then Deploy at the end.
+   Wraps on a narrow screen rather than scrolling sideways. */
+.saveDeployRow > .resetToolbar {
+  flex-wrap: wrap;
+}
+
+.saveDeployRow > .commissionHint {
+  margin: 0 auto 0 0;
+}
+
+.toolbarDeploy {
+  margin-left: 0.75rem;
+}
+
+/* The process graph in its own panel under the step breadcrumbs. */
+.processGraphWrap.processGraphPanel {
+  margin: 0 8px 0.75rem 0;
+  padding: 0.5rem 0.7rem 0.7rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+}
+
+/* The step's working panel; the bootstrap shield is scoped to it. */
+.stepArea {
+  position: relative;
+}
+
+.stepAreaBusy {
+  min-height: 220px;
+}
+
+/* Step breadcrumbs at the panel heading's size (.fieldLabel). */
+.stepCrumb {
+  font-size: var(--font-size-sm);
+}
+
+.stepCrumbNum {
+  width: calc(var(--font-size-sm) * 1.3);
+  height: calc(var(--font-size-sm) * 1.3);
+}
+
+
+.toolbarGlyph {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+/* Location: a small map card at the right of the header's action strip. One ink,
+   the --graph-* ramp: a faint street grid with a couple of heavier
+   "roads", the pin and place name over it, the switch on a white strip. */
+.locationMap {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--graph-35);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-surface);
+}
+
+.locationMapPlace {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 2.4rem; /* same height as the header buttons beside it */
+  padding: 0.3rem 0.6rem;
+  box-sizing: border-box;
+  color: var(--graph-100);
+  background-color: var(--graph-10);
+  background-image:
+    linear-gradient(28deg, transparent 46%, var(--graph-35) 46%, var(--graph-35) 52%, transparent 52%),
+    linear-gradient(-62deg, transparent 58%, var(--graph-20) 58%, var(--graph-20) 62%, transparent 62%),
+    linear-gradient(var(--graph-20) 1px, transparent 1px),
+    linear-gradient(90deg, var(--graph-20) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 14px 14px, 14px 14px;
+}
+
+.locationMapPin {
+  flex: none;
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.locationMapName {
+  min-width: 0;
+  padding: 0.05rem 0.3rem;
+  background: var(--color-surface);
+  border-radius: 3px;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.locationMapToggle {
+  flex: none;
+  align-self: center;
+  width: 0.9rem;
+  height: 0.9rem;
+  margin: 0 0.5rem;
+  accent-color: var(--graph-100);
+  cursor: pointer;
+}
+
+.locationMapToggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Not factored in: the map fades back, the switch stays readable. */
+.locationMapOff .locationMapPlace {
+  opacity: 0.45;
+}
+
+.locationMapPlace:hover:not(:disabled) .locationMapName {
+  text-decoration: underline;
+}
+
+.locationMapPlace:disabled {
+  cursor: not-allowed;
+}
+
+/* The Outputs step's "waiting / proposing" loader: in the flow rather
+   than an overlay, so the step keeps at least 100px of height. */
+.outputsUpdating {
+  position: relative;
+  inset: auto;
+  min-height: 100px;
+}
+
+/* "Build your agent" heading sits 5px in from the panel's left edge. */
+.processGraphPanel .fieldLabelToggle .fieldLabel {
+  margin-left: 5px;
+}
+
+/* The pool popup. */
+.agentPoolOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  background: rgba(22, 50, 74, 0.45);
+}
+
+.agentPoolPanel {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 760px;
+  max-height: min(760px, 100%);
+  overflow: hidden;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: 0 20px 48px rgba(28, 40, 51, 0.28);
+}
+
+.agentPoolPanelBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.75rem 1rem 1rem;
+}
+
+@media (max-width: 600px) {
+  .agentPoolOverlay {
+    padding: 16px;
+  }
+}
+
+.agentPoolPanelHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  padding: 0.85rem 1rem 0.7rem;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.agentPoolPanelTitle {
+  margin: 0;
+  color: var(--color-accent);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: var(--font-size-base);
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.agentPoolPanelClose {
+  background: none;
+  border: none;
+  color: var(--color-muted);
+  cursor: pointer;
+  font-size: 1.2rem;
+  line-height: 1;
+  padding: 0 0.2rem;
+}
+
+

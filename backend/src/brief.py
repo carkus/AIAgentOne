@@ -94,6 +94,13 @@ def _topic_count_bullet(count: int, limit: int) -> str:
     )
 
 
+# A note about location or region, dropped when the user gave none.
+_LOCATION_NOTE_RE = re.compile(
+    r"\b(locations?|region(?:al|s)?|geograph\w*|country|countries|city|cities|"
+    r"area-specific|location-specific|where you are)\b",
+    re.IGNORECASE,
+)
+
 # Notes phrased as what the agent won't/can't do (a disclaimer, not a read
 # of this case). Dropped in code because the prompt rule alone didn't hold.
 _DISCLAIMER_RE = re.compile(
@@ -132,7 +139,7 @@ Specialties/keywords: {keywords}
 {location_line}Active behaviors: {behaviors}
 Active personality traits: {traits}
 {prior_qa}
-Most of the time, just write the brief directly and confidently — you don't need the user's permission to interpret a reasonable set of specialties. Only when the specialties are genuinely ambiguous, sparse, or pulling in conflicting directions (e.g. a single very broad word with no other context, two contradictory domains, or a location need that isn't clear) should you ask the user ONE short, specific clarifying question instead of guessing — don't ask just because you *could* be more specific.
+Most of the time, just write the brief directly and confidently — you don't need the user's permission to interpret a reasonable set of specialties. Only when the specialties are genuinely ambiguous, sparse, or pulling in conflicting directions (e.g. a single very broad word with no other context, two contradictory domains{location_question}) should you ask the user ONE short, specific clarifying question instead of guessing — don't ask just because you *could* be more specific.
 
 {case_type_rule}
 When writing the brief: third person, THREE short paragraphs separated by a blank line (written as \n\n inside the JSON string, never a raw line break), roughly 8-11 sentences in all. It should read as a considered write-up of this particular agent, not a one-liner.
@@ -148,8 +155,7 @@ Not enough to go on (should be RARE): only when the specialties together give yo
 Separately from the ambiguity check above, also consider whether something about how this agent is set up will shape the results in a way the user should know before commissioning it. If so, add ONE "warning": an informative note shown as a tip under the brief, not an error message. Write it as 1-2 plain, friendly sentences addressed to the user ("you"): say what this means for THIS commission in practice (name the actual topics, keywords or gap involved) and what they could do about it if they want to. Never restate a situation below as a label or rule, and no alarm words ("warning", "error", "danger"). Situations worth a note:
 {topic_count_bullet}- Specialties spanning clearly unrelated domains (e.g. "tax law" and "vintage motorcycles"): the agent's persona and searches will be split between them rather than focused.
 - A specialty that explicitly asks for binding legal, medical, financial, or safety advice (e.g. "tell me which pills to take"): it will research and summarise the topic, not act as a professional adviser. Only when a specialty actually asks for that; never as a general disclaimer.
-- A specialty that is only meaningful with a location (e.g. "weather", "local events", "rental prices") but no location was given.
-If more than one situation applies, write about the one that changes the results most. Never mention the agent type's internal id. A note is never a disclaimer: never write about what the agent will not do, capabilities it lacks, or other kinds of agent it isn't.
+{location_bullet}If more than one situation applies, write about the one that changes the results most. Never mention the agent type's internal id. A note is never a disclaimer: never write about what the agent will not do, capabilities it lacks, or other kinds of agent it isn't.
 This is independent of the question/brief choice above: a note can accompany either a brief or a question. Omit "warning" (or use null) when nothing is worth pointing out; don't invent one just to have one.
 
 When you write a brief (not a question), also offer up to two pieces of media the user could take away from this commission before it runs, picked for what would genuinely help THIS case: "slides" (to pitch or present the commission), "pdf" (a polished case file to share), "docx" (an editable case file), "diagram" (how the work splits across the focus topics and any workers), "markdown" (a working brief to keep editing), "json" (one entry per line of inquiry, for tracking). Each reason is one short line naming what it would contain for this case specifically. Offer none ([]) when nothing would really add to the brief.
@@ -197,12 +203,23 @@ def generate_brief(
         f" A location ({location}) only belongs where it genuinely shapes the work."
         if location else " The agent is not location-bound: never mention location."
     )
+    # Location only comes up as a question or a note when one was given and
+    # is unclear. With none, the user switched it off (or never set one) on
+    # purpose: a "no location was provided" note is just wrong.
+    location_question = ", or a location need that isn't clear" if location else ""
+    location_bullet = (
+        f'- A specialty that needs a narrower area than "{location}" to mean anything '
+        '(e.g. "local events" for a whole country).\n'
+        if location else ""
+    )
     prompt = _BRIEF_PROMPT.format(
         agent_type=agent_type or "general",
         agent_name=agent_name or "Agent",
         keywords=", ".join(keywords) if keywords else "(none yet)",
         location_line=location_line,
         location_rule=location_rule,
+        location_question=location_question,
+        location_bullet=location_bullet,
         behaviors=", ".join(behaviors) if behaviors else "(none)",
         traits=", ".join(traits) if traits else "(none)",
         location_clause=location_clause,
@@ -242,6 +259,11 @@ def generate_brief(
             # A "will not / cannot" disclaimer isn't a note about this case;
             # the prompt forbids it, but small models still write one.
             logger.info("brief: dropped disclaimer note: %s", warning[:160])
+            warning = None
+        if warning and not location and _LOCATION_NOTE_RE.search(warning):
+            # The prompt no longer asks about location when there is none,
+            # but a model can still volunteer "no location was provided".
+            logger.info("brief: dropped location note with location off: %s", warning[:160])
             warning = None
         if not text:
             return None
@@ -311,4 +333,102 @@ def generate_brief_map(
         return brief_map
     except Exception as e:
         logger.warning("brief map: generation failed (%s): %s", provider or "default", e)
+        return None
+
+
+# Setup's Outputs step: what the agent proposes to hand back for this job.
+# Unlike BRIEF_RELIC_KINDS these are produced after research, so a chart or
+# spreadsheet (which need real numbers) are fair game.
+OUTPUT_KINDS = ("csv", "chart", "diagram", "markdown", "pdf", "docx", "slides", "json")
+
+_OUTPUTS_PROMPT = """You are an AI agent about to start a job. Before starting, propose the
+finished outputs (deliverables) you would hand back to the user for this job,
+judged by what would actually be most useful to them, not a generic list.
+
+Focus topics (the job): {keywords}
+Agent type: {agent_type}
+Personality: {traits}
+Behaviour: {behaviors}
+Brief the user has read:
+{brief}
+
+Allowed kinds:
+- csv: a spreadsheet of rows (comparisons, timelines, inventories of sources or facts)
+- chart: a chart of real numbers found during research
+- diagram: a Mermaid diagram (process, structure, relationships, timeline)
+- markdown: a written report
+- pdf: a polished printable report
+- docx: an editable Word document
+- slides: a short slide deck
+- json: structured data for another program
+
+Return ONLY JSON, no prose, in this shape:
+{{"outputs": [{{"kind": "<one allowed kind>", "title": "<short specific title, max 8 words>", "reason": "<one sentence: why this output suits this job>", "recommended": true}}]}}
+
+Rules:
+- Propose 3 to 5 outputs, each a different kind.
+- Titles name this job's actual subject, never a generic label like "Report".
+- Mark the 1 or 2 you judge most useful "recommended": true, the rest false.
+"""
+
+
+def _output_proposals(raw) -> list[dict]:
+    items = raw.get("outputs") if isinstance(raw, dict) else raw
+    proposals: list[dict] = []
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind") or "").strip().lower()
+        title = _clip(item.get("title"), 80)
+        if kind not in OUTPUT_KINDS or not title or any(p["kind"] == kind for p in proposals):
+            continue
+        proposals.append({
+            "kind": kind,
+            "title": title,
+            "reason": _clip(item.get("reason"), 200),
+            "recommended": bool(item.get("recommended")),
+        })
+    return proposals[:5]
+
+
+def propose_outputs(
+    keywords: list[str],
+    brief_text: str = "",
+    agent_type: str | None = None,
+    traits: list[str] | None = None,
+    behaviors: list[str] | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+) -> list[dict] | None:
+    """Setup's Outputs step: 3-5 deliverables the agent proposes for this
+    job, each {kind, title, reason, recommended}. None on failure, so the
+    step can fall back to letting the user pick kinds by hand."""
+    if not keywords:
+        return None
+    prompt = _OUTPUTS_PROMPT.format(
+        keywords=", ".join(str(k) for k in keywords)[:600],
+        agent_type=agent_type or "general",
+        traits=", ".join(traits or []) or "(none)",
+        behaviors=", ".join(behaviors or []) or "(none)",
+        brief=(brief_text or "(not written yet)").strip()[:3000],
+    )
+    try:
+        response = create_chat_completion(
+            provider=provider,
+            model=model,
+            max_tokens=4000,  # headroom for Gemini thinking, as above
+            temperature=0.5,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = (response.choices[0].message.content or "").strip()
+        raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        proposals = _output_proposals(json.loads(raw, strict=False))
+        if not proposals:
+            logger.warning("brief outputs: reply had no usable outputs")
+            return None
+        if not any(p["recommended"] for p in proposals):
+            proposals[0]["recommended"] = True
+        return proposals
+    except Exception as e:
+        logger.warning("brief outputs: generation failed (%s): %s", provider or "default", e)
         return None

@@ -11,7 +11,7 @@ import pills from '../styles/Setup.module.css'
 import BehaviorIcon from './BehaviorIcon'
 
 // Same cap as basic Setup's MAX_SPECIALTIES.
-const MAX_FOCUS = 5
+const MAX_FOCUS = 4
 
 // Advanced agent creation: the same bootstrap pipeline as Setup.tsx, but the
 // user's intent travels as a structured spec (types.ts's AgentSpec) instead of

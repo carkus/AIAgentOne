@@ -27,6 +27,7 @@ import { extractMermaidDiagrams } from '../mermaidExtract'
 import AgentBriefingModal from './AgentBriefingModal'
 import ResultRating from './ResultRating'
 import styles from '../styles/Chat.module.css'
+import ah from '../styles/AgentHeader.module.css'
 import splashLogo from '../assets/favicon.png'
 
 type ToolbarIconName = 'save' | 'saved' | 'roster' | 'export' | 'exporting' | 'copyChat' | 'copiedChat' | 'newAgent' | 'attach' | 'imagePlaceholder' | 'send' | 'location' | 'clock'
@@ -53,6 +54,12 @@ function extractJsonBlobs(content: string): { text: string; blobs: unknown[] } {
     }
   })
   return { text: paragraphs.join('\n\n'), blobs }
+}
+
+// The text a message shows. Chats saved before the report label lost its
+// flag emoji still store "🚩 Reported: ..."; the flag is dropped here.
+function shownUserText(m: { displayContent?: string; content: string }): string {
+  return (m.displayContent ?? m.content).replace(/^🚩\s*/u, '')
 }
 
 // Walks a rendered markdown <li>'s React children down to plain text, for
@@ -375,7 +382,7 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
   const [relicError, setRelicError] = useState<{ key: string; message: string } | null>(null)
   const [relicPreview, setRelicPreview] = useState<{ index: number; kind: RelicKind } | null>(null)
   const [exportMenuFor, setExportMenuFor] = useState<number | null>(null)
-  const [pdfPreview, setPdfPreview] = useState<{ blobUrl: string; filename: string; doc: ReturnType<typeof buildChatPdf> } | null>(null)
+  const [pdfPreview, setPdfPreview] = useState<{ blobUrl: string; filename: string; doc: Awaited<ReturnType<typeof buildChatPdf>> } | null>(null)
   // Rendered markdown DOM per assistant message index, so PDF export can
   // walk react-markdown's actual output (link hrefs, list/heading structure)
   // instead of re-parsing the raw markdown string itself.
@@ -446,6 +453,25 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
   // _delegation_rule_body iterates over it). Changing focus means going back
   // to Setup, not editing it mid-chat.
   const focusPool = agentConfig.keywords ?? []
+
+  // Every worker agent built so far in this conversation (finished
+  // delegate_to_worker results), once each, in the order they were built.
+  // Shown in the tools strip ahead of the tools, as what the agent has used.
+  const builtWorkers = useMemo(() => {
+    const seen = new Map<string, string[]>()
+    for (const m of messages) {
+      for (const tc of m.toolCalls ?? []) {
+        if (tc.tool !== 'delegate_to_worker' || tc.result === '…') continue
+        try {
+          const r = JSON.parse(tc.result) as { worker_name?: unknown; worker_traits?: unknown }
+          if (typeof r.worker_name === 'string' && !seen.has(r.worker_name)) {
+            seen.set(r.worker_name, Array.isArray(r.worker_traits) ? r.worker_traits.map(String) : [])
+          }
+        } catch { /* not a worker result */ }
+      }
+    }
+    return [...seen].map(([name, traits]) => ({ name, traits }))
+  }, [messages])
 
   // Recomputed whenever messages changes, so a new image shows up in the
   // strip as soon as the reply that carries it finishes streaming in.
@@ -587,21 +613,34 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
     )
   }
 
-  function handleExportPdf() {
+  async function handleExportPdf() {
     if (messages.length === 0 || exporting) return
     setExporting(true)
     try {
+      // The same pre-processing the chat applies before rendering a reply,
+      // so the PDF draws what the reader saw.
       const pdfMessages: PdfMessage[] = messages
-        .map((m, i) => ({
-          role: m.role,
-          content: m.displayContent ?? m.content,
-          contentEl: m.role === 'assistant' ? markdownRefs.current.get(i) ?? null : null,
-          toolCallCount: m.toolCalls?.length,
-          toolCalls: m.toolCalls,
-          durationSeconds: m.durationSeconds,
-          usage: m.usage,
-        }))
-        .filter(m => m.content || m.toolCallCount)
+        .map((m): PdfMessage => {
+          const base = {
+            toolCallCount: m.toolCalls?.length,
+            toolCalls: m.toolCalls,
+            durationSeconds: m.durationSeconds,
+            usage: m.usage,
+          }
+          if (m.role === 'user') return { role: 'user', content: shownUserText(m), image: m.image, ...base }
+          const { text: afterDiagrams, diagrams } = extractMermaidDiagrams(m.content ?? '')
+          const { text, blobs } = extractJsonBlobs(afterDiagrams)
+          return {
+            role: 'assistant',
+            content: normalizeInlineOrderedLists(text),
+            diagrams,
+            jsonBlobs: blobs,
+            planDiagram: m.planDiagram,
+            planSummary: m.planSummary,
+            ...base,
+          }
+        })
+        .filter(m => m.content || m.image || m.toolCallCount || m.planDiagram || m.diagrams?.length)
 
       const traitPool = PERSONALITY_TRAITS[agentConfig.template ?? 'research'] ?? PERSONALITY_TRAITS.research
       const context: PdfAgentContext = {
@@ -616,7 +655,7 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
           .map(id => traitPool.find(t => t.id === id)?.label ?? id),
         tools: agentConfig.tools.map(t => t.name),
       }
-      const doc = buildChatPdf(`Agent ${agentName}`, pdfMessages, context)
+      const doc = await buildChatPdf(`Agent ${agentName}`, pdfMessages, context)
       const safeName = agentName.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'agent'
       const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
       const filename = `chat-${safeName}-${stamp}.pdf`
@@ -707,7 +746,7 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
     const blocks: string[] = []
     const textLines: string[] = []
     messages.forEach((msg, i) => {
-      const shownText = msg.displayContent ?? msg.content
+      const shownText = shownUserText(msg)
       if (!shownText) return
       const isUser = msg.role === 'user'
       const label = isUser ? 'You' : `Agent ${agentName}`
@@ -1056,7 +1095,7 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
       `Give me the improved answer itself, in full, in English unless I wrote in another language, ` +
       `using your tools again if you need more information. ` +
       `Do not describe or critique your tools or this request, and do not mention this check.`
-    void sendMessage(refinement, messages, undefined, `🚩 Reported: ${item.reason}`)
+    void sendMessage(refinement, messages, undefined, `Reported: ${item.reason}`)
     // Reported and handed back to the agent: it's resolved, so it leaves the
     // self-check list (the new turn's own checks will flag it again if not).
     setEvalResults(prev => prev.filter(r => r !== item))
@@ -1086,88 +1125,94 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
           onBackToSetup={onBackToSetup}
         />
       )}
+      {/* Goes back to the Setup/search screen — navigation only, unlike
+          "New agent" in the toolbar (which recommissions this same agent
+          and wipes its messages). A past version of this logo doubled as
+          that reset button, which silently lost the conversation; this
+          button calls a distinct onBackToSetup instead, so the chat
+          state itself is left untouched. */}
+      <button type="button" className={styles.headerLogoBtn} onClick={onBackToSetup} aria-label="Back to search">
+        <img src={splashLogo} alt="Agent One" className={styles.headerLogo} />
+      </button>
+      {/* The agent's page in one bordered card, as on Setup (.agentCard). */}
+      <div className={styles.card}>
       <header className={styles.header}>
-        <div className={styles.headerIdentity}>
-          {/* Goes back to the Setup/search screen — navigation only, unlike
-              "New agent" in the toolbar (which recommissions this same agent
-              and wipes its messages). A past version of this logo doubled as
-              that reset button, which silently lost the conversation; this
-              button calls a distinct onBackToSetup instead, so the chat
-              state itself is left untouched. */}
-          <button type="button" className={styles.headerLogoBtn} onClick={onBackToSetup} aria-label="Back to search">
-            <img src={splashLogo} alt="Agent One" className={styles.headerLogo} />
-          </button>
-
-          <div className={styles.headerIdentityText}>
-            <span className={styles.headerTitle}>Agent {agentName}</span>
-            {activePersonalityLabels.length > 0 && (
-              <span className={styles.personaTraits}>
-                {activePersonalityLabels.join(' · ')}
+        {/* The header is shared with Setup (AgentHeader.module.css):
+            row 1 is the name and meta line, row 2 the action strip. */}
+        <div className={`${ah.header} ${styles.headerBox}`}>
+          <div className={ah.identity}>
+            <span className={ah.name}>Agent {agentName}</span>
+            <div className={ah.meta}>
+              <span className={ah.metaItem} title={shownModelTitle}>
+                <span aria-hidden="true">🧠</span> {shownModel}
               </span>
-            )}
-            {usedLocation && (
-              <span className={styles.locationBadge}>
-                <ToolbarIcon name="location" /> {usedLocation}
+              {usedLocation && (
+                <span className={ah.metaItem}>
+                  <ToolbarIcon name="location" /> {usedLocation}
+                </span>
+              )}
+              <span className={ah.metaItem}>
+                <ToolbarIcon name="clock" /> {formatDate(now, getDateFormat(), true)}
               </span>
-            )}
-            <span className={styles.dateTimeBadge}>
-              <ToolbarIcon name="clock" /> {formatDate(now, getDateFormat(), true)}
-            </span>
+              {activePersonalityLabels.length > 0 && (
+                <span className={ah.metaItem}>
+                  {activePersonalityLabels.join(' · ')}
+                </span>
+              )}
+            </div>
           </div>
-        </div>
-        <div className={styles.headerActions}>
-          <span className={styles.modelBadge} title={shownModelTitle}>
-            {shownModel}
-          </span>
-          <div className={styles.headerActionButtons}>
+          <div className={ah.actions}>
+            <div className={ah.group} role="group" aria-label="Conversation actions">
+              <button
+                type="button"
+                className={ah.btn}
+                onClick={handleSaveChat}
+                disabled={messages.length === 0}
+                aria-label={saveFeedback ?? 'Save chat'}
+                title={saveFeedback ?? 'Save this conversation locally so it can be reopened later'}
+              >
+                <ToolbarIcon name={saveFeedback ? 'saved' : 'save'} />
+              </button>
+              <button
+                type="button"
+                className={ah.btn}
+                onClick={() => setRosterOpen(o => !o)}
+                disabled={messages.length === 0}
+                aria-label="Roster"
+                title="Save this agent and deploy them as a callable tool on the roster"
+              >
+                <ToolbarIcon name="roster" />
+              </button>
+              <button
+                type="button"
+                className={ah.btn}
+                onClick={handleCopyChat}
+                disabled={messages.length === 0}
+                aria-label={copyFeedback ?? 'Copy chat'}
+                title={copyFeedback ?? 'Copy the whole conversation as formatted HTML'}
+              >
+                <ToolbarIcon name={copyFeedback === 'Copied ✓' ? 'copiedChat' : 'copyChat'} />
+              </button>
+              <button
+                type="button"
+                className={ah.btn}
+                onClick={handleExportPdf}
+                disabled={messages.length === 0 || exporting}
+                aria-label={exporting ? 'Exporting…' : 'Export PDF'}
+                title="Export PDF"
+              >
+                <ToolbarIcon name={exporting ? 'exporting' : 'export'} />
+              </button>
+            </div>
             <button
               type="button"
-              className={styles.saveBtn}
-              onClick={handleSaveChat}
-              disabled={messages.length === 0}
-              aria-label={saveFeedback ?? 'Save chat'}
-              title={saveFeedback ?? 'Save this conversation locally so it can be reopened later'}
-            >
-              <ToolbarIcon name={saveFeedback ? 'saved' : 'save'} />
-            </button>
-            <button
-              type="button"
-              className={styles.rosterBtn}
-              onClick={() => setRosterOpen(o => !o)}
-              disabled={messages.length === 0}
-              aria-label="Roster"
-              title="Save this agent and deploy them as a callable tool on the roster"
-            >
-              <ToolbarIcon name="roster" />
-            </button>
-            <button
-              type="button"
-              className={styles.copyBtn}
-              onClick={handleCopyChat}
-              disabled={messages.length === 0}
-              aria-label={copyFeedback ?? 'Copy chat'}
-              title={copyFeedback ?? 'Copy the whole conversation as formatted HTML'}
-            >
-              <ToolbarIcon name={copyFeedback === 'Copied ✓' ? 'copiedChat' : 'copyChat'} />
-            </button>
-            <button
-              type="button"
-              className={styles.exportBtn}
-              onClick={handleExportPdf}
-              disabled={messages.length === 0 || exporting}
-              aria-label={exporting ? 'Exporting…' : 'Export PDF'}
-              title="Export PDF"
-            >
-              <ToolbarIcon name={exporting ? 'exporting' : 'export'} />
-            </button>
-            <button
-              type="button"
-              className={styles.resetBtn}
+              className={`${ah.btn} ${ah.btnText} ${ah.btnPrimary}`}
               onClick={onReset}
               aria-label="New agent"
               title="New agent — recommission a fresh agent, wiping this conversation"
             >
               <ToolbarIcon name="newAgent" />
+              <span>New agent</span>
             </button>
           </div>
         </div>
@@ -1228,6 +1273,20 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
             </div>
           )}
           <div className={styles.toolsBadges}>
+        {builtWorkers.length > 0 && (
+          <>
+            {builtWorkers.map(w => (
+              <span
+                key={w.name}
+                className={styles.workerPill}
+                title={w.traits.length ? `Worker agent · ${w.traits.join(', ')}` : 'Worker agent'}
+              >
+                {w.name}
+              </span>
+            ))}
+            <span className={styles.workerArrow} aria-label="using" title="Using these tools">→</span>
+          </>
+        )}
         {agentConfig.tools.filter(t => t.name !== 'save_output').map(t => (
           <span key={t.name} className={styles.badge}>{t.name}</span>
         ))}
@@ -1403,7 +1462,7 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
                       </>
                     )
                   })()
-                : <p className={styles.bubbleText}>{msg.displayContent ?? msg.content}</p>
+                : <p className={styles.bubbleText}>{shownUserText(msg)}</p>
             )}
             {msg.role === 'assistant' && msg.durationSeconds !== undefined && msg.nextOptions && msg.nextOptions.length > 0 && (
               <div className={styles.nextOptions} role="group" aria-label="Options to continue">
@@ -1523,7 +1582,8 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
         {newBelow && (
           <div className={styles.newContentDock}>
             <button type="button" className={styles.newContentBadge} onClick={jumpToLatest}>
-              New content ↓
+              <span>New content</span>
+              <span className={styles.newContentArrow} aria-hidden="true">↓</span>
             </button>
           </div>
         )}
@@ -1618,6 +1678,7 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
         </button>
       </form>
         </div>
+      </div>
       </div>
       {pdfPreview && (
         <PdfPreviewModal

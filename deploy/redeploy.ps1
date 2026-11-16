@@ -32,7 +32,11 @@ function Deploy-Backend {
     if (Test-Path $tmpTar) { Remove-Item $tmpTar -Force }
     Push-Location (Join-Path $RepoRoot "backend")
     try {
-        tar czf $tmpTar --exclude=__pycache__ --exclude=*.pyc .
+        # Same excludes as redeploy.sh: the local (Windows) venv is large and
+        # useless on the droplet, and the database/logs/eval runs are local
+        # runtime files.
+        tar czf $tmpTar --exclude=__pycache__ --exclude=*.pyc --exclude=venv `
+            --exclude=agentone.db* --exclude=*.log --exclude=eval_runs .
         if ($LASTEXITCODE -ne 0) { throw "tar failed" }
     } finally {
         Pop-Location

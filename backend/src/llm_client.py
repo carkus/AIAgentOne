@@ -94,13 +94,41 @@ _cf_exhausted_until = 0.0
 
 def _note_cloudflare_error(e: Exception) -> None:
     global _cf_exhausted_until
-    text = str(e)
+    # str(APIStatusError) is just "Error code: 429"; the 4006 code and the
+    # message are in the response body, so check that too.
+    text = f"{e} {getattr(e, 'body', '')}"
+    response = getattr(e, "response", None)
+    if response is not None:
+        try:
+            text += f" {response.text}"
+        except Exception:
+            pass
     if "4006" in text or "daily free allocation" in text:
         import datetime
         now = datetime.datetime.now(datetime.timezone.utc)
         reset = (now + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         _cf_exhausted_until = reset.timestamp()
         logger.warning("Workers AI daily allocation used up; skipping it until %s", reset.isoformat())
+
+
+# Gemini prepaid credits depleted (402) won't recover until someone tops up,
+# so after one, skip Gemini for a while instead of paying a failed round trip
+# on every call. Retried after the cooldown in case credits were added.
+_GEMINI_COOLDOWN_S = 15 * 60
+_gemini_skip_until = 0.0
+
+
+def _note_gemini_error(e: Exception) -> None:
+    global _gemini_skip_until
+    if getattr(e, "status_code", None) == 402 or "prepayment credits are depleted" in str(e):
+        import time
+        _gemini_skip_until = time.time() + _GEMINI_COOLDOWN_S
+        logger.warning("Gemini credits depleted; skipping it for %d min", _GEMINI_COOLDOWN_S // 60)
+
+
+def gemini_available() -> bool:
+    import time
+    return bool(os.environ.get("GEMINI_API_KEY")) and time.time() >= _gemini_skip_until
 
 
 def cloudflare_available() -> bool:
@@ -206,11 +234,21 @@ def create_chat_completion(provider: str | None = None, model: str | None = None
     # of failing the whole call. Never on to Gemini: that can cost money.
     if forced == "cloudflare":
         providers = [p for p in _PROVIDERS if p[0] in ("cloudflare", "ollama")]
+    # A "gemini" choice falls back to the free providers when the call fails
+    # (prepaid credits depleted -> 402, quota -> 429, outage), instead of
+    # failing every bootstrap and chat turn: Workers AI, then Ollama.
+    elif forced == "gemini" and os.environ.get("GEMINI_API_KEY"):
+        providers = _PROVIDERS
+    # An "ollama" choice falls back to Workers AI (also free) if the local
+    # server is down. Never on to Gemini: that can cost money.
+    elif forced == "ollama" and ollama_enabled():
+        providers = [p for p in _PROVIDERS if p[0] in ("ollama", "cloudflare")]
+        providers.sort(key=lambda p: p[0] != "ollama")
 
     last_error = None
     for name, client, default_model in providers:
-        if name == "gemini" and not os.environ.get("GEMINI_API_KEY"):
-            logger.info("Skipping gemini: GEMINI_API_KEY not set")
+        if name == "gemini" and not gemini_available():
+            logger.info("Skipping gemini: GEMINI_API_KEY not set, or credits depleted")
             continue
         if name == "ollama" and not ollama_enabled():
             continue
@@ -262,6 +300,8 @@ def create_chat_completion(provider: str | None = None, model: str | None = None
             logger.warning("LLM provider %s (%s) failed: %s", name, use_model, e)
             if name == "cloudflare":
                 _note_cloudflare_error(e)
+            if name == "gemini":
+                _note_gemini_error(e)
             run_trace.record(
                 trace_kind, trace_label, started, status="error", provider=name,
                 model=use_model, detail=str(e)[:300],

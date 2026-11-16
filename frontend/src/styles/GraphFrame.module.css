@@ -11,7 +11,7 @@
   max-height: 85vh;
   aspect-ratio: 1 / 1;
   margin: 0.6rem 0;
-  background: #f5f6f4;
+  background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: 6px;
   overflow: hidden;
@@ -78,7 +78,7 @@
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   color: var(--color-accent);
-  font-family: 'Inter', sans-serif;
+  font-family: inherit;
   font-size: 1rem;
   font-weight: 600;
   line-height: 1;
@@ -91,7 +91,7 @@
 
 .level {
   color: var(--color-muted);
-  font-family: 'Inter', sans-serif;
+  font-family: inherit;
   font-size: 0.65rem;
   font-weight: 600;
 }

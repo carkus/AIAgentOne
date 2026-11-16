@@ -28,9 +28,19 @@ export default function RelicPreviewModal({ relic, filename, agentName, busy, er
 
   useEffect(() => {
     if (relic.kind !== 'pdf') return
-    const url = buildRelicPdf(relic.content, `Agent ${agentName} report`).output('bloburl').toString()
-    setPdfUrl(url)
-    return () => URL.revokeObjectURL(url)
+    let cancelled = false
+    let url: string | null = null
+    buildRelicPdf(relic.content, `Agent ${agentName} report`)
+      .then(doc => {
+        if (cancelled) return
+        url = doc.output('bloburl').toString()
+        setPdfUrl(url)
+      })
+      .catch(() => { if (!cancelled) setPdfUrl(null) })
+    return () => {
+      cancelled = true
+      if (url) URL.revokeObjectURL(url)
+    }
   }, [relic, agentName])
 
   const body = useMemo(() => {

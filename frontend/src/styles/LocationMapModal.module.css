@@ -1,0 +1,294 @@
+/* Map picker for the search location. Dossier chrome copied from
+   ScoreboardModal.module.css (CSS Modules scoping); the map itself is
+   OpenStreetMap greyscaled and tinted with the page's ink. */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(22, 50, 74, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 40px;
+}
+
+/* Same manila-folder "dossier" chrome as SettingsModal.module.css's
+   .modal/.dossierTab/.header — kept as its own copy per CSS Modules scoping,
+   sized a little wider than the settings panel since agent rows carry more
+   text (name + tool_name + description + stats badge per row). */
+.modal {
+  position: relative;
+  background: var(--color-bg);
+  border: 1px solid var(--color-dossier-border);
+  border-radius: 3px 10px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 760px;
+  max-height: min(680px, 100%);
+  overflow: hidden;
+  box-shadow:
+    0 1px 0 var(--color-dossier-shadow-light),
+    0 8px 0 -3px var(--color-dossier-shadow-mid),
+    0 8px 1px -3px var(--color-dossier-border),
+    0 20px 48px rgba(28, 40, 51, 0.28);
+}
+
+.header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--color-dossier);
+  border-bottom: 1px solid var(--color-dossier-border);
+  padding: 1.35rem 1.1rem 0.75rem;
+  flex-shrink: 0;
+}
+
+.dossierTab {
+  position: absolute;
+  top: -1.05rem;
+  left: 0.75rem;
+  z-index: 1;
+  background: var(--color-dossier);
+  clip-path: polygon(10% 0, 90% 0, 100% 100%, 0 100%);
+  color: var(--color-dossier-text);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: var(--font-size-xs);
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.3rem 0.95rem 0.35rem;
+  filter:
+    drop-shadow(0 -1px 0 var(--color-dossier-border))
+    drop-shadow(-1px 0 0 var(--color-dossier-border))
+    drop-shadow(1px 0 0 var(--color-dossier-border));
+}
+
+.title {
+  color: var(--color-dossier-text);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: var(--font-size-lg);
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.closeBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-dossier-text-a35);
+  color: var(--color-dossier-muted);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.closeBtn:hover {
+  background: var(--color-dossier-text-a10);
+  color: var(--color-text);
+}
+
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0.9rem 1.1rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.searchRow {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-sm);
+}
+
+.searchInput:focus {
+  outline: none;
+  border-color: var(--graph-65);
+}
+
+.btn {
+  flex: none;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--graph-35);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--graph-100);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btnPrimary {
+  background: var(--graph-100);
+  border-color: var(--graph-100);
+  color: #fff;
+}
+
+.btnPrimary:hover:not(:disabled) {
+  background: var(--graph-80);
+}
+
+.results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  max-height: 9rem;
+  overflow-y: auto;
+}
+
+.results li + li {
+  border-top: 1px solid var(--color-border);
+}
+
+.results button {
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  background: none;
+  border: none;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.results button:hover {
+  background: var(--graph-10);
+}
+
+/* The map: tiles greyscaled, then a multiply layer in the page's ink so
+   the land reads as shades of one colour like the rest of the site. */
+.map {
+  position: relative;
+  height: min(420px, 55vh);
+  border: 1px solid var(--graph-35);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--graph-10);
+}
+
+.map:global(.leaflet-container) {
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+  background: var(--graph-10);
+}
+
+.map :global(.leaflet-tile-pane) {
+  filter: grayscale(1) contrast(0.92) brightness(1.04);
+}
+
+.map::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 250; /* above the tiles (200), under the pin (600) */
+  background: var(--graph-20);
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+
+.map :global(.leaflet-control-zoom) {
+  border: 1px solid var(--graph-35);
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.map :global(.leaflet-control-zoom a) {
+  color: var(--color-text);
+  font-family: inherit;
+  font-weight: 400;
+}
+
+.map :global(.leaflet-control-zoom a:hover) {
+  background: var(--graph-10);
+}
+
+.map :global(.leaflet-control-attribution) {
+  background: rgba(255, 255, 255, 0.8);
+  color: var(--color-muted);
+}
+
+.map :global(.leaflet-control-attribution a) {
+  color: var(--color-text);
+}
+
+.pinIcon {
+  color: var(--graph-100);
+  background: none;
+  border: none;
+}
+
+.pinIcon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.status {
+  margin: 0;
+  min-height: 1.2em;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statusError {
+  color: #b91c1c;
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.6rem 1.1rem 1rem;
+}
+
+@media (max-width: 560px) {
+  .overlay {
+    padding: 16px;
+  }
+
+  .searchRow {
+    flex-wrap: wrap;
+  }
+
+  .searchInput {
+    flex-basis: 100%;
+  }
+}

@@ -1,4 +1,4 @@
-import type { AgentConfig, AgentSpec, AgentTemplateId, ArmStat, BootstrapStreamEvent, EvalResultItem, LlmProvider, RelicSuggestion, SavedChatMessage, StreamEvent } from './types';
+import type { AgentConfig, AgentSpec, AgentTemplateId, ArmStat, BootstrapStreamEvent, Deliverable, EvalResultItem, LlmProvider, RelicKind, RelicSuggestion, SavedChatMessage, StreamEvent } from './types';
 
 const API_URL = import.meta.env.VITE_API_URL ?? '';
 
@@ -219,6 +219,76 @@ export async function fetchBriefMap(
 }
 
 /**
+ * Smart Focus (POST /brief-focus, focus_insights.py): chosen topics that
+ * overlap in meaning, and Saved Focus items related to what's chosen, by
+ * embedding similarity. Null on any failure: the Focus step shows nothing
+ * extra.
+ */
+export interface FocusInsights {
+  overlaps: { a: string; b: string; similarity: number }[]
+  related: { topic: string; near: string; similarity: number }[]
+}
+
+export async function fetchFocusInsights(
+  keywords: string[],
+  pool: string[],
+  provider?: LlmProvider,
+  signal?: AbortSignal,
+): Promise<FocusInsights | null> {
+  try {
+    const res = await fetch(`${API_URL}/brief-focus`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal,
+      body: JSON.stringify({ keywords, pool, provider: provider ?? undefined }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return Array.isArray(data.overlaps) && Array.isArray(data.related) ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Setup's Outputs step: the deliverables the agent proposes for this job
+ * (POST /brief-outputs, brief.py's propose_outputs). Resolves to null on any
+ * failure, and the step falls back to picking kinds by hand.
+ */
+export async function fetchBriefOutputs(
+  keywords: string[],
+  brief: string,
+  agentType: AgentTemplateId | undefined,
+  traits: string[],
+  behaviors: string[],
+  provider?: LlmProvider,
+  ollamaModel?: string | null,
+  signal?: AbortSignal,
+): Promise<Deliverable[] | null> {
+  try {
+    const res = await fetch(`${API_URL}/brief-outputs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal,
+      body: JSON.stringify({
+        keywords,
+        brief,
+        agentType,
+        traits,
+        behaviors,
+        provider: provider ?? undefined,
+        ollama_model: ollamaModel ?? undefined,
+      }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return Array.isArray(data.outputs) ? data.outputs : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * In-character "Previously…" recap of a resumed saved chat
  * (backend/src/recap.py), shown in AgentBriefingModal, plus the directions
  * the agent proposes to take next (may be empty). Throws on any failure —
@@ -367,7 +437,21 @@ export interface AgentDraft {
   location: string;
   traits: string[];
   behaviorToggles?: string[];
+  /** Absent on profiles saved before these were kept. */
+  factorLocation?: boolean;
+  outputs?: RelicKind[];
+  /** The agent as last built from this profile; reloading it skips
+   * bootstrap. Absent when it was never deployed, or the steps changed since. */
+  builtConfig?: AgentConfig;
   savedAt: number;
+}
+
+/** The parts of a profile beyond name/type/focus/location/character. */
+export interface AgentDraftExtras {
+  factorLocation?: boolean;
+  outputs?: RelicKind[];
+  /** null clears a stale build; leave out to keep whatever is stored. */
+  builtConfig?: AgentConfig | null;
 }
 
 /** Saved agent profiles — the pre-bootstrap draft (name, type, location,
@@ -394,11 +478,12 @@ export async function createAgentDraft(
   location: string,
   traits: string[],
   behaviorToggles: string[] = [],
+  extras?: AgentDraftExtras,
 ): Promise<AgentDraft> {
   const res = await fetch(`${API_URL}/agent-drafts`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ agentName, agentType, keywords, location, traits, behaviorToggles }),
+    body: JSON.stringify({ agentName, agentType, keywords, location, traits, behaviorToggles, ...extras }),
   });
   if (!res.ok) throw new Error('Failed to save agent profile');
   return res.json();
@@ -414,11 +499,12 @@ export async function updateAgentDraft(
   location: string,
   traits: string[],
   behaviorToggles: string[] = [],
+  extras?: AgentDraftExtras,
 ): Promise<AgentDraft> {
   const res = await fetch(`${API_URL}/agent-drafts/${encodeURIComponent(id)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ agentName, agentType, keywords, location, traits, behaviorToggles }),
+    body: JSON.stringify({ agentName, agentType, keywords, location, traits, behaviorToggles, ...extras }),
   });
   if (!res.ok) throw new Error('Failed to update agent profile');
   return res.json();

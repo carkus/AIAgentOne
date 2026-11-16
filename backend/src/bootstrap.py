@@ -913,12 +913,12 @@ def _generate_agent_config_stream(
     shape, same _build_user_content handling.
 
     Event shapes:
-      {"type": "status", "message": "..."}
+      {"type": "status", "message": "...", "stage": "grounding|design|checks|selfcheck"}
       {"type": "tool",   "name": "..."}
       {"type": "done",   "config": {...}}
       {"type": "error",  "message": "..."}
     """
-    yield {"type": "status", "message": "Thinking about your purpose…"}
+    yield {"type": "status", "message": "Thinking about your purpose…", "stage": "grounding"}
 
     # Step-by-step account of this bootstrap, shown as "How this agent was
     # made" (AgentMakingReport.tsx) alongside the timed bootstrap_trace.
@@ -932,7 +932,8 @@ def _generate_agent_config_stream(
     )
     user_content = _build_user_content(prompt, image, provider)
     if fewshot_count:
-        yield {"type": "status", "message": f"Found {fewshot_count} similar past agent(s) — reusing what worked…"}
+        yield {"type": "status", "message": f"Found {fewshot_count} similar past agent(s) — reusing what worked…", "stage": "grounding"}
+    yield {"type": "status", "message": "Designing the agent…", "stage": "design"}
 
     seen_tools: set[str] = set()
     seen_persona = False
@@ -987,11 +988,11 @@ def _generate_agent_config_stream(
 
             if not seen_persona and _PERSONA_KEY_RE.search(buffer):
                 seen_persona = True
-                yield {"type": "status", "message": "Choosing a personality…"}
+                yield {"type": "status", "message": "Choosing a personality…", "stage": "design"}
 
             if not seen_system_prompt and _SYSTEM_PROMPT_KEY_RE.search(buffer):
                 seen_system_prompt = True
-                yield {"type": "status", "message": "Writing system prompt…"}
+                yield {"type": "status", "message": "Writing system prompt…", "stage": "design"}
 
             # Tool names are only scanned for past the "tools": [ marker —
             # persona also has a "name" field, and matching it here would
@@ -1027,7 +1028,7 @@ def _generate_agent_config_stream(
         # _try_parse never returns a None config alongside a None error.
         assert error is not None
         report["json_fix"] = {"error": f"{error.msg} at char {error.pos}", "fixed": False}
-        yield {"type": "status", "message": "Fixing malformed response…"}
+        yield {"type": "status", "message": "Fixing malformed response…", "stage": "checks"}
         correction_meta: dict = {}
         try:
             correction_response = create_chat_completion(
@@ -1064,6 +1065,7 @@ def _generate_agent_config_stream(
         )}
         return
 
+    yield {"type": "status", "message": "Checking the tool code…", "stage": "checks"}
     # Same compile-check + one correction retry as generate_agent_config —
     # see _tool_syntax_errors for why JSON validity alone isn't enough,
     # _forbidden_call_errors for a generated tool calling a primitive/
@@ -1095,7 +1097,7 @@ def _generate_agent_config_stream(
     )
     report["code_checks"] = {"issues": _issue_list(tool_errors), "retried": bool(tool_errors)}
     if tool_errors:
-        yield {"type": "status", "message": "Fixing broken tool code…"}
+        yield {"type": "status", "message": "Fixing broken tool code…", "stage": "checks"}
         tool_fix_meta: dict = {}
         try:
             correction_response = create_chat_completion(
@@ -1155,8 +1157,9 @@ def _generate_agent_config_stream(
     report["spec_notes"] = []
     for note in agent_spec.enforce_on_config(config, spec):
         report["spec_notes"].append(note)
-        yield {"type": "status", "message": note}
+        yield {"type": "status", "message": note, "stage": "checks"}
 
+    yield {"type": "status", "message": "Running self-checks…", "stage": "selfcheck"}
     report["self_checks"] = []
     try:
         for eval_result in eval_checks.check_bootstrap(

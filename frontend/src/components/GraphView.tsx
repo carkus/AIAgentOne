@@ -514,6 +514,7 @@ function GraphViewInner({ timeline, live = false, evalResults = [], trace = [] }
     <GraphFrame
       className={styles.container}
       label="Reasoning trace graph"
+      controls={false}
       height={height}
       scrollX
       contentWidth={contentWidth}
@@ -544,7 +545,7 @@ function GraphViewInner({ timeline, live = false, evalResults = [], trace = [] }
         zoomOnDoubleClick={false}
         preventScrolling={false}
       >
-        <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="#e2dfd5" />
+        <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="var(--graph-20)" />
       </ReactFlow>
       {/* Portalled: inside the frame, a transformed ancestor turned the
           fixed overlay into one clipped to the graph box. */}

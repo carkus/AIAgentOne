@@ -111,6 +111,10 @@ export interface AgentConfig {
   // templated rundown of the agent's tools.
   intro?: string;
   keywords?: string[];
+  // Outputs picked on Setup's Outputs step (POST /brief-outputs proposals).
+  // agent_stream.py tells the agent to work toward them and always offers
+  // them as relic buttons on research turns.
+  deliverables?: Deliverable[];
   location?: string;
   // "Factor in location" on Setup. Absent = the type's default (on only for
   // job_search); agent_stream.py drops the location when false.
@@ -298,6 +302,15 @@ export interface Relic {
   createdAt: string
 }
 
+// An output the agent proposes for a job on Setup's Outputs step
+// (brief.py's propose_outputs); `recommended` is the agent's own pick.
+export interface Deliverable {
+  kind: RelicKind
+  title: string
+  reason?: string
+  recommended?: boolean
+}
+
 export interface RelicSuggestion {
   kind: RelicKind
   reason: string
@@ -310,7 +323,8 @@ export interface ModelAttempt {
 
 // Stream events emitted by /bootstrap (backend/src/bootstrap.py:generate_agent_config_stream)
 export type BootstrapStreamEvent =
-  | { type: 'status'; message: string }
+  // stage: which bootstrap step the message belongs to (ProcessGraph).
+  | { type: 'status'; message: string; stage?: 'grounding' | 'design' | 'checks' | 'selfcheck' }
   | { type: 'tool'; name: string }
   | { type: 'model'; used: ModelAttempt | null; failed: ModelAttempt[] }
   | ({ type: 'eval_result' } & EvalResultItem)

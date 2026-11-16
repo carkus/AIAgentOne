@@ -63,7 +63,7 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
   {
     id: 'research',
     label: 'Researcher',
-    keywordPlaceholder: 'Build your agent.',
+    keywordPlaceholder: 'Add a focus',
     buildPurpose: (keywords, loc) =>
       `Research agent for the following keywords: ${keywords.join(', ')}. ` +
       `Focus specifically on recent changes and developments in the industry, ` +

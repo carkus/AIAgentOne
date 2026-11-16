@@ -5,20 +5,35 @@ import ImageViewer from './ImageViewer'
 import CopyButton from './CopyButton'
 import GraphFrame from './GraphFrame'
 
-const GRAPH_ACCENT = '#05384b'
+// Same look as the app's other graphs (the --graph-* ramp in index.css):
+// one hue, the page's text colour, mixed into white in linear steps, and
+// the page's own font. Mermaid needs concrete colours, so the mix is done
+// here from the live --color-text rather than with CSS color-mix().
+function pageTextColor(): string {
+  const v = getComputedStyle(document.documentElement).getPropertyValue('--color-text').trim()
+  return /^#[0-9a-f]{6}$/i.test(v) ? v : '#1f5373'
+}
+
+// `pct` of `hex` mixed into white, as #rrggbb.
+function mixWithWhite(hex: string, pct: number): string {
+  const n = parseInt(hex.slice(1), 16)
+  const ch = (c: number) => Math.round(c * pct / 100 + 255 * (1 - pct / 100)).toString(16).padStart(2, '0')
+  return `#${ch((n >> 16) & 255)}${ch((n >> 8) & 255)}${ch(n & 255)}`
+}
 
 let initialized = false
 
 function ensureInitialized() {
   if (initialized) return
   initialized = true
-  // 'base' only themes flowchart-style nodes (primaryColor/lineColor/etc.) —
-  // pie and xychart-beta charts pull their slice/bar colors from their own
-  // pie1-12/xyChart palettes instead, which default to mermaid's stock
-  // pastel set (includes a washed-out pink) if left unset. Pinning both to
-  // the app's own teal/steel-blue/navy palette keeps every chart type
-  // consistent instead of just flowcharts.
-  const fontFamily = "'Share Tech Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+  const ink = pageTextColor()
+  const g = (pct: number) => mixWithWhite(ink, pct)
+  // Series colours step down the same ramp, darkest first, so slices and
+  // bars read as shades of one ink rather than a set of signal colours.
+  // Kept dark enough that the white slice labels stay readable.
+  const ramp = [100, 85, 72, 60, 50, 42].map(g)
+  const pies = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`pie${i + 1}`, ramp[i % ramp.length]]))
+  const fontFamily = getComputedStyle(document.body).fontFamily || "'Inter', 'Segoe UI', sans-serif"
   mermaid.initialize({
     startOnLoad: false,
     theme: 'base',
@@ -31,45 +46,39 @@ function ensureInitialized() {
     // own catch below already turns into the quieter raw-source fallback.
     suppressErrorRendering: true,
     themeVariables: {
-      background: '#f5f6f4',
-      primaryColor: '#f2f1ec',
-      primaryTextColor: '#16324a',
-      primaryBorderColor: GRAPH_ACCENT,
-      lineColor: GRAPH_ACCENT,
-      secondaryColor: '#e6e4dc',
-      tertiaryColor: '#f0efe9',
+      background: '#ffffff',
+      primaryColor: '#ffffff',
+      primaryTextColor: ink,
+      primaryBorderColor: g(50),
+      lineColor: g(50),
+      secondaryColor: g(10),
+      tertiaryColor: g(6),
+      clusterBkg: g(6),
+      clusterBorder: g(20),
+      edgeLabelBackground: '#ffffff',
+      textColor: ink,
+      nodeTextColor: ink,
       fontSize: '14px',
       fontFamily,
-      pie1: GRAPH_ACCENT,
-      pie2: '#3f7ea0',
-      pie3: '#c98a2c',
-      pie4: '#6b8f71',
-      pie5: '#5c6b73',
-      pie6: '#b6552c',
-      pie7: '#8a9a3f',
-      pie8: '#2f4858',
-      pie9: '#d9a441',
-      pie10: '#4a7c8c',
-      pie11: '#7a5c3e',
-      pie12: '#597a4a',
+      ...pies,
       pieOpacity: '1',
-      pieStrokeColor: '#f5f6f4',
-      pieOuterStrokeColor: '#16324a',
-      pieSectionTextColor: '#16324a',
-      pieTitleTextColor: '#16324a',
-      pieLegendTextColor: '#33475a',
+      pieStrokeColor: '#ffffff',
+      pieOuterStrokeColor: g(50),
+      pieSectionTextColor: '#ffffff',
+      pieTitleTextColor: ink,
+      pieLegendTextColor: ink,
       xyChart: {
-        backgroundColor: '#f5f6f4',
-        titleColor: '#16324a',
-        xAxisLabelColor: '#33475a',
-        xAxisTitleColor: '#33475a',
-        xAxisTickColor: '#8a94a0',
-        xAxisLineColor: '#8a94a0',
-        yAxisLabelColor: '#33475a',
-        yAxisTitleColor: '#33475a',
-        yAxisTickColor: '#8a94a0',
-        yAxisLineColor: '#8a94a0',
-        plotColorPalette: `${GRAPH_ACCENT},#3f7ea0,#c98a2c,#6b8f71,#b6552c,#5c6b73`,
+        backgroundColor: '#ffffff',
+        titleColor: ink,
+        xAxisLabelColor: ink,
+        xAxisTitleColor: ink,
+        xAxisTickColor: g(35),
+        xAxisLineColor: g(35),
+        yAxisLabelColor: ink,
+        yAxisTitleColor: ink,
+        yAxisTickColor: g(35),
+        yAxisLineColor: g(35),
+        plotColorPalette: ramp.join(','),
       },
     },
     // Without this, mermaid renders each diagram at its own natural
@@ -302,14 +311,15 @@ export default function MermaidDiagram({ chart, label, caption }: Props) {
     </div>
   ) : (
     <>
-      {/* Square, zoomable holder (GraphFrame) — drag to pan, +/−/fit to
-          zoom, ⛶ for the full-screen viewer. The svg is drawn at its own
+      {/* Square holder (GraphFrame) — drag to pan, ⛶ for the full-screen
+          viewer (no +/−/fit buttons). The svg is drawn at its own
           natural size (withExplicitSvgSize) and the frame scales it. */}
       <GraphFrame
         className={styles.mermaidDiagram}
         contentClassName={styles.mermaidContent}
         label="Diagram"
         onExpand={() => setViewerOpen(true)}
+        zoomButtons={false}
       >
         <div dangerouslySetInnerHTML={{ __html: svg ?? '' }} />
       </GraphFrame>
