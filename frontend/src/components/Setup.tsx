@@ -2307,9 +2307,13 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
               ) : (
                 <>
                   <div className={styles.briefBody} aria-busy={briefLoading}>
-                  {/* Once paragraphs are landing, progress sits above them
-                      instead of covering them. */}
-                  {briefLoading && briefDraftText && briefStagesEl}
+                  {/* Progress sits above the graph and text, never over them. */}
+                  {briefLoading && (briefStagesEl ?? (
+                    <p className={styles.briefMapDrawing} role="status">
+                      <span className={styles.briefUpdatingSpinner} aria-hidden="true" />
+                      <span>Updating brief…</span>
+                    </p>
+                  ))}
                   {(briefMap || briefMapLoading) && (
                     <div className={styles.writtenBrief}>
                       <SectionHeader
@@ -2354,16 +2358,6 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                         ↻ Retry
                       </button>
                     </p>
-                  )}
-                  {briefLoading && !briefDraftText && (
-                    <div className={styles.briefUpdating} role="status">
-                      {briefStagesEl ?? (
-                        <>
-                          <span className={styles.briefUpdatingSpinner} aria-hidden="true" />
-                          <span>Updating brief…</span>
-                        </>
-                      )}
-                    </div>
                   )}
                   </div>
                   {briefWarning && (

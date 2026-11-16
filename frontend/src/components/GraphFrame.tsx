@@ -90,10 +90,14 @@ export default function GraphFrame({ children, zoom, onExpand, className, conten
     // Fit to the width, capped at 85vh tall (same cap as the CSS), and make
     // the frame exactly that tall so a wide diagram doesn't sit in a square
     // of empty space.
-    const maxH = window.innerHeight * maxHeightVh
+    // The style height is the border box: take the frame's own top+bottom
+    // border out of the cap and add it back to the height, so the inside is
+    // exactly the fitted content and nothing is left to pan.
+    const border = frame.offsetHeight - frame.clientHeight
+    const maxH = window.innerHeight * maxHeightVh - border
     const scale = Math.min(maxFitScale, Math.max(MIN_SCALE, Math.min((aw - 2 * FIT_PAD) / cw, (maxH - 2 * FIT_PAD) / ch)))
     const fh = Math.min(maxH, ch * scale + 2 * FIT_PAD)
-    setHeight(fh)
+    setHeight(fh + border)
     setView({ scale, x: (aw - cw * scale) / 2, y: (fh - ch * scale) / 2 })
   }, [maxHeightVh, maxFitScale])
 

@@ -9,7 +9,8 @@ import type { LlmProvider, ModelAttempt, TraceSpan } from './types'
 export const GEMINI_MODEL_NAME = 'gemini-3.6-flash'
 export const DEFAULT_OLLAMA_MODEL = 'qwen3:8b'
 // Mirrors llm_client.CLOUDFLARE_MODELS[0] (Workers AI's hosted Qwen).
-export const DEFAULT_CLOUDFLARE_MODEL = '@cf/qwen/qwen3.8-27b'
+// 30B-A3B since 2026-11-17: 3-5 s a call where qwen3.8-27b took 26-52 s.
+export const DEFAULT_CLOUDFLARE_MODEL = '@cf/qwen/qwen3-30b-a3b-fp8'
 
 // "@cf/qwen/qwen3.8-27b" -> "qwen3.8-27b"
 export function shortCloudflareModel(model: string): string {
@@ -36,6 +37,14 @@ export function storedOllamaModel(): string {
 
 export function storedCloudflareModel(): string {
   try {
+    // One-time move off the old default (qwen3.8-27b), as storedOllamaModel
+    // does; a model picked in Settings afterwards is kept.
+    if (!localStorage.getItem('aiagent_cf_default_v2')) {
+      localStorage.setItem('aiagent_cf_default_v2', '1')
+      if (localStorage.getItem('aiagent_cloudflare_model') === '@cf/qwen/qwen3.8-27b') {
+        localStorage.setItem('aiagent_cloudflare_model', DEFAULT_CLOUDFLARE_MODEL)
+      }
+    }
     return localStorage.getItem('aiagent_cloudflare_model') || DEFAULT_CLOUDFLARE_MODEL
   } catch {
     return DEFAULT_CLOUDFLARE_MODEL

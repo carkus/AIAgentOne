@@ -71,10 +71,10 @@ OLLAMA_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "8192"))
 CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
 CLOUDFLARE_MODELS = [
     m.strip() for m in os.environ.get(
-        "CLOUDFLARE_MODELS", "@cf/qwen/qwen3.8-27b,@cf/qwen/qwen3-30b-a3b-fp8"
+        "CLOUDFLARE_MODELS", "@cf/qwen/qwen3-30b-a3b-fp8,@cf/qwen/qwen3.8-27b"
     ).split(",") if m.strip()
 ]
-CLOUDFLARE_MODEL = CLOUDFLARE_MODELS[0] if CLOUDFLARE_MODELS else "@cf/qwen/qwen3.8-27b"
+CLOUDFLARE_MODEL = CLOUDFLARE_MODELS[0] if CLOUDFLARE_MODELS else "@cf/qwen/qwen3-30b-a3b-fp8"
 
 
 def ollama_enabled() -> bool:

@@ -1392,7 +1392,11 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
                         {diagrams.length > 0 && (
                           <div className={styles.extractedDiagrams}>
                             {diagrams.map((chart, di) => (
-                              <MermaidDiagram key={di} chart={chart} />
+                              <MermaidDiagram
+                                key={di}
+                                chart={chart}
+                                onNodeClick={thinking ? undefined : text => sendMessage(text, messages, undefined, undefined, true)}
+                              />
                             ))}
                           </div>
                         )}

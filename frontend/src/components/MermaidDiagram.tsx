@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import mermaid from 'mermaid'
 import styles from '../styles/Chat.module.css'
 import ImageViewer from './ImageViewer'
@@ -238,7 +238,14 @@ interface Props {
   // before its diagram is drawn reads as broken, not as loading.
   label?: string
   caption?: string
+  // Clicking a node (flowchart/mindmap) sends its text as the next prompt.
+  // Unset while a turn is running, so nodes aren't clickable then.
+  onNodeClick?: (text: string) => void
 }
+
+// A pointer that moves further than this between down and up was a pan,
+// not a click on a node.
+const CLICK_SLOP_PX = 5
 
 // Same themed, repaired render as the component below, for callers that need
 // the SVG markup itself (Chat.tsx's diagram relic download). Desktop width,
@@ -254,12 +261,19 @@ export async function renderMermaidSvg(chart: string): Promise<string> {
 // Renders a ```mermaid fenced code block from the agent's reply as an actual
 // diagram (flowchart, pie/bar chart, mind map, etc.) instead of raw text —
 // the "prefer a diagram over a wordy paragraph" output style.
-export default function MermaidDiagram({ chart, label, caption }: Props) {
+export default function MermaidDiagram({ chart, label, caption, onNodeClick }: Props) {
   ensureInitialized()
   const id = useId().replace(/:/g, '-')
   const [svg, setSvg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [viewerOpen, setViewerOpen] = useState(false)
+  const downAt = useRef<{ x: number; y: number } | null>(null)
+
+  const nodeText = (target: EventTarget | null): string | null => {
+    const node = (target as Element | null)?.closest?.('g.node, g.mindmap-node')
+    const text = node?.textContent?.replace(/\s+/g, ' ').trim()
+    return text || null
+  }
 
   useEffect(() => {
     if (!looksLikeMermaid(chart)) {
@@ -323,7 +337,19 @@ export default function MermaidDiagram({ chart, label, caption }: Props) {
         maxHeightVh={0.35}
         maxFitScale={1}
       >
-        <div dangerouslySetInnerHTML={{ __html: svg ?? '' }} />
+        <div
+          className={onNodeClick ? styles.mermaidClickable : undefined}
+          onPointerDown={e => { downAt.current = { x: e.clientX, y: e.clientY } }}
+          onClick={e => {
+            const start = downAt.current
+            downAt.current = null
+            if (!onNodeClick || !start) return
+            if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > CLICK_SLOP_PX) return
+            const text = nodeText(e.target)
+            if (text) onNodeClick(text)
+          }}
+          dangerouslySetInnerHTML={{ __html: svg ?? '' }}
+        />
       </GraphFrame>
       {viewerOpen && svg && <ImageViewer svg={svg} onClose={() => setViewerOpen(false)} />}
     </>

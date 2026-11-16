@@ -1151,8 +1151,8 @@
   animation: briefSpin 0.8s linear infinite;
 }
 
-/* The streamed brief's stages (Setup.tsx's briefStagesEl): over the old
-   brief until the first paragraph lands, then in a row above the draft. */
+/* The streamed brief's stages (Setup.tsx's briefStagesEl): in a row above
+   the brief graph and text from the start, never over them. */
 .briefStages {
   display: flex;
   flex-wrap: wrap;

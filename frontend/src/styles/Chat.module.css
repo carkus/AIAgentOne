@@ -806,6 +806,12 @@
   border-radius: inherit;
 }
 
+/* Reply diagrams: clicking a node sends it as the next prompt. */
+.mermaidClickable :global(g.node),
+.mermaidClickable :global(g.mindmap-node) {
+  cursor: pointer;
+}
+
 /* The one-or-two-sentence "takeaway" the model writes right after a diagram,
    now stacked below the full-width box above rather than beside it. */
 .mermaidDiagram + p {

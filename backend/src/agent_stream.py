@@ -1559,7 +1559,8 @@ clarifying question only belongs AFTER you've already produced real findings
    flowchart LR
      Start --> A[Search X] --> B[Search Y] --> C[Compare] --> Answer
    ```
-   Max ~8 nodes. Skip this entirely for a simple, single-step question that
+   Then, in the SAME reply, make the tool calls the plan lists: a plan on
+   its own is not a reply. Max ~8 nodes. Skip this entirely for a simple, single-step question that
    needs no tools or just one tool call. Every node label MUST be plain text
    with NO `[`, `]`, or `"` characters inside it (e.g. write `Compare
    providers reviews and prices`, never `Compare providers' reviews]` or
@@ -1867,6 +1868,7 @@ clarifying question only belongs AFTER you've already produced real findings
         )}
     delegation_count = 0
     team_nudges = 0
+    plan_nudges = 0
     report_nudges = 0
     # A research turn on the job (the opening message, or an option/idea the
     # user clicked, flagged `research` by Chat.tsx) must go to a team of at
@@ -1939,9 +1941,11 @@ clarifying question only belongs AFTER you've already produced real findings
             # (tool-call detection, history, final answer) so it never leaks
             # into any of those, and stream it as its own event right away.
             raw_content = message.content
+            plan_drawn = False
             if iteration == 0 and raw_content:
                 plan_diagram, plan_summary, raw_content = _extract_plan_diagram(raw_content)
                 if plan_diagram:
+                    plan_drawn = True
                     yield {"type": "plan", "diagram": plan_diagram, "summary": plan_summary}
 
             # Append assistant turn to history. Dump the full raw message rather
@@ -2040,6 +2044,31 @@ clarifying question only belongs AFTER you've already produced real findings
                 # more before recovering), so this allows up to two retries
                 # before giving up, rather than the one-shot ceiling used for
                 # the costlier/more ambiguous cases below.
+                # Rule 6 puts the plan first; some models (Qwen on Workers
+                # AI) then stop with the plan and nothing else, which ended
+                # the turn right after the plan graph. Send it back to carry
+                # the plan out.
+                if (
+                    plan_drawn
+                    and plan_nudges < 1
+                    and finish_reason == "stop"
+                    and len(final_text.strip()) < 200
+                ):
+                    plan_nudges += 1
+                    yield _status(
+                        "Carrying out the plan…", "Sent back for another try",
+                        "It posted its plan but stopped before doing any of it.",
+                    )
+                    current_messages.append({
+                        "role": "user",
+                        "content": (
+                            "That is your plan. Now carry it out: make the tool calls"
+                            + (" and delegate_to_worker calls" if "delegate_to_worker" in tool_names else "")
+                            + " it lists, all in this reply. Do not redraw the plan."
+                        ),
+                    })
+                    continue
+
                 # Team rule (rule 8): a research turn on a job with focus
                 # topics goes to at least 2 workers. One send-back if the
                 # model answered alone or with a single worker.
