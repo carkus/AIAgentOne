@@ -376,7 +376,7 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
   const [relicError, setRelicError] = useState<{ key: string; message: string } | null>(null)
   const [relicPreview, setRelicPreview] = useState<{ index: number; kind: RelicKind } | null>(null)
   const [exportMenuFor, setExportMenuFor] = useState<number | null>(null)
-  const [pdfPreview, setPdfPreview] = useState<{ blobUrl: string; filename: string; doc: ReturnType<typeof buildChatPdf> } | null>(null)
+  const [pdfPreview, setPdfPreview] = useState<{ blobUrl: string; filename: string; doc: Awaited<ReturnType<typeof buildChatPdf>> } | null>(null)
   // Rendered markdown DOM per assistant message index, so PDF export can
   // walk react-markdown's actual output (link hrefs, list/heading structure)
   // instead of re-parsing the raw markdown string itself.
@@ -588,21 +588,34 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
     )
   }
 
-  function handleExportPdf() {
+  async function handleExportPdf() {
     if (messages.length === 0 || exporting) return
     setExporting(true)
     try {
+      // The same pre-processing the chat applies before rendering a reply,
+      // so the PDF draws what the reader saw.
       const pdfMessages: PdfMessage[] = messages
-        .map((m, i) => ({
-          role: m.role,
-          content: m.displayContent ?? m.content,
-          contentEl: m.role === 'assistant' ? markdownRefs.current.get(i) ?? null : null,
-          toolCallCount: m.toolCalls?.length,
-          toolCalls: m.toolCalls,
-          durationSeconds: m.durationSeconds,
-          usage: m.usage,
-        }))
-        .filter(m => m.content || m.toolCallCount)
+        .map((m): PdfMessage => {
+          const base = {
+            toolCallCount: m.toolCalls?.length,
+            toolCalls: m.toolCalls,
+            durationSeconds: m.durationSeconds,
+            usage: m.usage,
+          }
+          if (m.role === 'user') return { role: 'user', content: m.displayContent ?? m.content, image: m.image, ...base }
+          const { text: afterDiagrams, diagrams } = extractMermaidDiagrams(m.content ?? '')
+          const { text, blobs } = extractJsonBlobs(afterDiagrams)
+          return {
+            role: 'assistant',
+            content: normalizeInlineOrderedLists(text),
+            diagrams,
+            jsonBlobs: blobs,
+            planDiagram: m.planDiagram,
+            planSummary: m.planSummary,
+            ...base,
+          }
+        })
+        .filter(m => m.content || m.image || m.toolCallCount || m.planDiagram || m.diagrams?.length)
 
       const traitPool = PERSONALITY_TRAITS[agentConfig.template ?? 'research'] ?? PERSONALITY_TRAITS.research
       const context: PdfAgentContext = {
@@ -617,7 +630,7 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
           .map(id => traitPool.find(t => t.id === id)?.label ?? id),
         tools: agentConfig.tools.map(t => t.name),
       }
-      const doc = buildChatPdf(`Agent ${agentName}`, pdfMessages, context)
+      const doc = await buildChatPdf(`Agent ${agentName}`, pdfMessages, context)
       const safeName = agentName.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'agent'
       const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
       const filename = `chat-${safeName}-${stamp}.pdf`

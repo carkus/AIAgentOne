@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { buildReportPdf } from './chatPdf'
+import { svgToPng } from './imageData'
 import { renderMermaidSvg } from './components/MermaidDiagram'
 import type { Relic, RelicKind } from './types'
 
@@ -103,28 +104,6 @@ function markdownDocument(content: string, fallbackTitle: string): { title: stri
 export function buildRelicPdf(content: string, fallbackTitle: string) {
   const { title, el } = markdownDocument(content, fallbackTitle)
   return buildReportPdf(title, el)
-}
-
-async function svgToPng(svg: string, scale = 2): Promise<Blob> {
-  const root = new DOMParser().parseFromString(svg, 'image/svg+xml').documentElement
-  const width = parseFloat(root.getAttribute('width') ?? '') || 1200
-  const height = parseFloat(root.getAttribute('height') ?? '') || 800
-  const img = new Image()
-  await new Promise<void>((resolve, reject) => {
-    img.onload = () => resolve()
-    img.onerror = () => reject(new Error('Could not draw the chart as an image'))
-    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
-  })
-  const canvas = document.createElement('canvas')
-  canvas.width = Math.ceil(width * scale)
-  canvas.height = Math.ceil(height * scale)
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('Could not draw the chart as an image')
-  ctx.fillStyle = '#ffffff'
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-  return new Promise((resolve, reject) =>
-    canvas.toBlob(b => (b ? resolve(b) : reject(new Error('Could not draw the chart as an image'))), 'image/png'))
 }
 
 async function buildDocx(content: string, fallbackTitle: string): Promise<Blob> {
@@ -237,7 +216,7 @@ export async function downloadRelic(relic: Relic, agentName: string): Promise<vo
   else if (kind === 'markdown') downloadBlob(new Blob([content], { type: 'text/markdown;charset=utf-8' }), filename)
   else if (kind === 'diagram') downloadBlob(new Blob([await renderMermaidSvg(content)], { type: 'image/svg+xml' }), filename)
   else if (kind === 'chart') downloadBlob(await svgToPng(await renderMermaidSvg(content)), filename)
-  else if (kind === 'pdf') buildRelicPdf(content, fallbackTitle).save(filename)
+  else if (kind === 'pdf') (await buildRelicPdf(content, fallbackTitle)).save(filename)
   else if (kind === 'docx') downloadBlob(await buildDocx(content, fallbackTitle), filename)
   else downloadBlob(await buildPptx(content), filename)
 }
