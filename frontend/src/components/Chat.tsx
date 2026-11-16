@@ -56,6 +56,12 @@ function extractJsonBlobs(content: string): { text: string; blobs: unknown[] } {
   return { text: paragraphs.join('\n\n'), blobs }
 }
 
+// The text a message shows. Chats saved before the report label lost its
+// flag emoji still store "🚩 Reported: ..."; the flag is dropped here.
+function shownUserText(m: { displayContent?: string; content: string }): string {
+  return (m.displayContent ?? m.content).replace(/^🚩\s*/u, '')
+}
+
 // Walks a rendered markdown <li>'s React children down to plain text, for
 // the "Extend upon this idea" button's follow-up prompt — it needs the
 // bullet's own words, not its JSX (bold/links/inline code all render as
@@ -448,6 +454,25 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
   // to Setup, not editing it mid-chat.
   const focusPool = agentConfig.keywords ?? []
 
+  // Every worker agent built so far in this conversation (finished
+  // delegate_to_worker results), once each, in the order they were built.
+  // Shown in the tools strip ahead of the tools, as what the agent has used.
+  const builtWorkers = useMemo(() => {
+    const seen = new Map<string, string[]>()
+    for (const m of messages) {
+      for (const tc of m.toolCalls ?? []) {
+        if (tc.tool !== 'delegate_to_worker' || tc.result === '…') continue
+        try {
+          const r = JSON.parse(tc.result) as { worker_name?: unknown; worker_traits?: unknown }
+          if (typeof r.worker_name === 'string' && !seen.has(r.worker_name)) {
+            seen.set(r.worker_name, Array.isArray(r.worker_traits) ? r.worker_traits.map(String) : [])
+          }
+        } catch { /* not a worker result */ }
+      }
+    }
+    return [...seen].map(([name, traits]) => ({ name, traits }))
+  }, [messages])
+
   // Recomputed whenever messages changes, so a new image shows up in the
   // strip as soon as the reply that carries it finishes streaming in.
   const assets = useMemo(() => extractImageAssets(messages), [messages])
@@ -602,7 +627,7 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
             durationSeconds: m.durationSeconds,
             usage: m.usage,
           }
-          if (m.role === 'user') return { role: 'user', content: m.displayContent ?? m.content, image: m.image, ...base }
+          if (m.role === 'user') return { role: 'user', content: shownUserText(m), image: m.image, ...base }
           const { text: afterDiagrams, diagrams } = extractMermaidDiagrams(m.content ?? '')
           const { text, blobs } = extractJsonBlobs(afterDiagrams)
           return {
@@ -721,7 +746,7 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
     const blocks: string[] = []
     const textLines: string[] = []
     messages.forEach((msg, i) => {
-      const shownText = msg.displayContent ?? msg.content
+      const shownText = shownUserText(msg)
       if (!shownText) return
       const isUser = msg.role === 'user'
       const label = isUser ? 'You' : `Agent ${agentName}`
@@ -1070,7 +1095,7 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
       `Give me the improved answer itself, in full, in English unless I wrote in another language, ` +
       `using your tools again if you need more information. ` +
       `Do not describe or critique your tools or this request, and do not mention this check.`
-    void sendMessage(refinement, messages, undefined, `🚩 Reported: ${item.reason}`)
+    void sendMessage(refinement, messages, undefined, `Reported: ${item.reason}`)
     // Reported and handed back to the agent: it's resolved, so it leaves the
     // self-check list (the new turn's own checks will flag it again if not).
     setEvalResults(prev => prev.filter(r => r !== item))
@@ -1248,6 +1273,20 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
             </div>
           )}
           <div className={styles.toolsBadges}>
+        {builtWorkers.length > 0 && (
+          <>
+            {builtWorkers.map(w => (
+              <span
+                key={w.name}
+                className={styles.workerPill}
+                title={w.traits.length ? `Worker agent · ${w.traits.join(', ')}` : 'Worker agent'}
+              >
+                {w.name}
+              </span>
+            ))}
+            <span className={styles.workerArrow} aria-label="using" title="Using these tools">→</span>
+          </>
+        )}
         {agentConfig.tools.filter(t => t.name !== 'save_output').map(t => (
           <span key={t.name} className={styles.badge}>{t.name}</span>
         ))}
@@ -1423,7 +1462,7 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
                       </>
                     )
                   })()
-                : <p className={styles.bubbleText}>{msg.displayContent ?? msg.content}</p>
+                : <p className={styles.bubbleText}>{shownUserText(msg)}</p>
             )}
             {msg.role === 'assistant' && msg.durationSeconds !== undefined && msg.nextOptions && msg.nextOptions.length > 0 && (
               <div className={styles.nextOptions} role="group" aria-label="Options to continue">
@@ -1543,7 +1582,8 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
         {newBelow && (
           <div className={styles.newContentDock}>
             <button type="button" className={styles.newContentBadge} onClick={jumpToLatest}>
-              New content ↓
+              <span>New content</span>
+              <span className={styles.newContentArrow} aria-hidden="true">↓</span>
             </button>
           </div>
         )}
