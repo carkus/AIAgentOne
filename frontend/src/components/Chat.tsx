@@ -453,14 +453,22 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
   // to Setup, not editing it mid-chat.
   const focusPool = agentConfig.keywords ?? []
 
-  // Every worker agent built so far in this conversation (finished
-  // delegate_to_worker results), once each, in the order they were built.
-  // Shown in the tools strip ahead of the tools, as what the agent has used.
+  // Every worker agent in this conversation, once each, in the order they
+  // were started. Shown in the tools strip ahead of the tools. A worker
+  // appears as soon as its delegate_to_worker call starts; its name only
+  // exists once it has been built (the worker invents its own persona), so
+  // until its result arrives it shows as pending, with its task as tooltip.
   const builtWorkers = useMemo(() => {
     const seen = new Map<string, string[]>()
-    for (const m of messages) {
-      for (const tc of m.toolCalls ?? []) {
-        if (tc.tool !== 'delegate_to_worker' || tc.result === '…') continue
+    const pending: { key: string; task: string }[] = []
+    messages.forEach((m, mi) => {
+      for (const tc of m.toolCalls ?? m.liveToolCalls ?? []) {
+        if (tc.tool !== 'delegate_to_worker') continue
+        if (tc.result === undefined || tc.result === '…') {
+          const callIndex = 'callIndex' in tc ? tc.callIndex : pending.length
+          pending.push({ key: `${mi}-${callIndex}`, task: String(tc.inputs?.task ?? '') })
+          continue
+        }
         try {
           const r = JSON.parse(tc.result) as { worker_name?: unknown; worker_traits?: unknown }
           if (typeof r.worker_name === 'string' && !seen.has(r.worker_name)) {
@@ -468,8 +476,11 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
           }
         } catch { /* not a worker result */ }
       }
+    })
+    return {
+      built: [...seen].map(([name, traits]) => ({ name, traits })),
+      pending,
     }
-    return [...seen].map(([name, traits]) => ({ name, traits }))
   }, [messages])
 
   // Recomputed whenever messages changes, so a new image shows up in the
@@ -1263,15 +1274,25 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
             </div>
           )}
           <div className={styles.toolsBadges}>
-        {builtWorkers.length > 0 && (
+        {(builtWorkers.built.length > 0 || builtWorkers.pending.length > 0) && (
           <>
-            {builtWorkers.map(w => (
+            <span className={styles.workerLabel}>Workers:</span>
+            {builtWorkers.built.map(w => (
               <span
                 key={w.name}
                 className={styles.workerPill}
                 title={w.traits.length ? `Worker agent · ${w.traits.join(', ')}` : 'Worker agent'}
               >
                 {w.name}
+              </span>
+            ))}
+            {builtWorkers.pending.map(w => (
+              <span
+                key={`pending-${w.key}`}
+                className={`${styles.workerPill} ${styles.workerPillPending}`}
+                title={w.task ? `Being built for: ${w.task}` : 'Worker agent being built'}
+              >
+                Building…
               </span>
             ))}
             <span className={styles.workerArrow} aria-label="using" title="Using these tools">→</span>
@@ -1527,6 +1548,8 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
               <ResultRating
                 feedback={msg.feedback}
                 onChange={feedback => setMessages(prev => prev.map((m, mi) => (mi === i ? { ...m, feedback } : m)))}
+                onReply={i === messages.length - 1 ? text => sendMessage(text, messages, undefined, undefined, true) : undefined}
+                replyDisabled={thinking}
               />
             )}
             {/* Only until the live graph appears: once it's up it already shows

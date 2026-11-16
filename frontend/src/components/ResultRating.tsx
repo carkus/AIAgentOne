@@ -5,6 +5,11 @@ import styles from '../styles/Chat.module.css'
 interface Props {
   feedback?: ResultFeedback
   onChange: (feedback: ResultFeedback | undefined) => void
+  // On the latest answer only: the box becomes a reply to the question the
+  // agent ended on, sent as the user's next message. Without it the box is
+  // the optional note on a rating, shown once a thumb is picked.
+  onReply?: (text: string) => void
+  replyDisabled?: boolean
 }
 
 function ThumbIcon({ down }: { down?: boolean }) {
@@ -20,7 +25,7 @@ function ThumbIcon({ down }: { down?: boolean }) {
 // Optional rating of one result. It steers the rest of this job only:
 // agent_stream.py's _job_continuity_note reads it from the history on the
 // next turn. Clicking the active thumb again clears it.
-export default function ResultRating({ feedback, onChange }: Props) {
+export default function ResultRating({ feedback, onChange, onReply, replyDisabled }: Props) {
   const [note, setNote] = useState(feedback?.note ?? '')
   useEffect(() => { setNote(feedback?.note ?? '') }, [feedback?.note])
 
@@ -31,6 +36,14 @@ export default function ResultRating({ feedback, onChange }: Props) {
     if (!feedback) return
     const trimmed = note.trim()
     if (trimmed !== (feedback.note ?? '')) onChange({ ...feedback, note: trimmed || undefined })
+  }
+
+  const [reply, setReply] = useState('')
+  const sendReply = () => {
+    const text = reply.trim()
+    if (!text || replyDisabled || !onReply) return
+    onReply(text)
+    setReply('')
   }
 
   return (
@@ -49,7 +62,28 @@ export default function ResultRating({ feedback, onChange }: Props) {
           <ThumbIcon down={r === 'down'} />
         </button>
       ))}
-      {feedback && (
+      {onReply && (
+        <>
+          <input
+            className={styles.resultRatingNote}
+            value={reply}
+            onChange={e => setReply(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); sendReply() } }}
+            placeholder="Reply to the agent's question…"
+            maxLength={2000}
+            aria-label="Reply to the agent"
+          />
+          <button
+            type="button"
+            className={`${styles.resultRatingBtn} ${styles.resultReplyBtn}`}
+            onClick={sendReply}
+            disabled={!reply.trim() || replyDisabled}
+          >
+            Reply
+          </button>
+        </>
+      )}
+      {!onReply && feedback && (
         <input
           className={styles.resultRatingNote}
           value={note}

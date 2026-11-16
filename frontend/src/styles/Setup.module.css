@@ -750,6 +750,36 @@
   border-radius: var(--radius-control);
 }
 
+/* The header's Agent controls, styled like the bottom toolbar's output
+   group (blue group, steel-blue buttons), without the tan panel. */
+.topTools {
+  gap: 0.3rem;
+  padding: 0.2rem;
+  background: #d9eaf2;
+  border: 1px solid #b4d2df;
+  border-radius: var(--radius-control);
+}
+
+.topTools > button {
+  width: auto;
+  min-width: 2rem;
+  height: 2rem;
+  border-color: #d9e9ef;
+  color: #3f7ea0;
+}
+
+.topTools > button svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.topTools > button:hover:not(:disabled),
+.topTools > button[aria-expanded='true'] {
+  background: #3f7ea0;
+  border-color: #3f7ea0;
+  color: #fff;
+}
+
 .toolbarOutputBtn {
   border-color: #d9e9ef;
   color: #3f7ea0;
@@ -1151,7 +1181,7 @@
   font-size: var(--font-size-sm);
   line-height: 1.55;
   white-space: pre-line; /* the AI brief comes as paragraphs split by blank lines */
-  background: #f2f0e6;
+  background: #f7f5ee;
   border-left: 3px solid var(--color-accent-secondary);
   border-radius: 0 6px 6px 0;
   padding: 0.65rem 0.75rem;
@@ -2824,6 +2854,7 @@
   flex-direction: column;
   gap: 0.15rem;
   min-width: 0;
+  font-size: var(--font-size-sm);
 }
 
 .outputTitle {
@@ -2910,30 +2941,55 @@
   align-self: auto;
 }
 
-/* ---- Natural height: the setup card grows, the page scrolls ----------
-   The setup card no longer shares the screen with the dossier, so nothing
-   inside it scrolls: every wrapper takes its content height and Setup's
-   own container is the one scroller (html/body still never scroll). */
+/* ---- Fit to screen: logo to Launch button always fills the viewport ----
+   The page never scrolls. The logo, agent header, process graph and the
+   Save/Deploy row keep their size; the step's working panel takes the
+   height left between them and is the one scroller. */
 .container {
-  overflow-y: auto;
-  align-items: flex-start;
+  overflow: hidden;
 }
 
 .card {
-  height: auto;
-  min-height: 100%;
-  overflow: visible;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Shrinks on short screens so the steps keep room to work in. */
+.brandLogo {
+  height: clamp(64px, 16vh, 160px);
 }
 
 .focusStack,
 .focusStack .agentCard,
 .agentCardFields,
 .agentCardFieldsContent,
-.setupTabsWrap,
+.setupTabsWrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.focusStack .agentCard {
+  margin: 0;
+}
+
+/* Very short screens: the graph and the step scroll together rather than
+   the step being squeezed out; the Deploy row stays pinned below. */
+.setupTabsWrap {
+  overflow-y: auto;
+}
+
+.stepArea {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 8rem;
+}
+
 .agentCardBody {
-  flex: none;
-  min-height: auto;
-  overflow: visible;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* ---- Agent Dossier: a manila folder drawer ------------------------------ */
@@ -3077,7 +3133,7 @@
   display: flex;
   align-items: stretch;
   border: 1px solid var(--graph-35);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   overflow: hidden;
   background: var(--color-surface);
 }
@@ -3233,3 +3289,47 @@
 }
 
 
+
+/* Setup's agent header: the name 10% larger, the model at the right end of
+   its row, and the action row's controls nudged down to sit centred between
+   the divider and the panel below (position only; the row keeps its size). */
+.setupAgentName {
+  font-size: calc(var(--font-size-xl) * 1.1);
+}
+
+.setupModelMeta {
+  margin-left: auto;
+}
+
+.topTools,
+.locationMap {
+  position: relative;
+  top: 6px;
+}
+
+/* Retry on the brief's "couldn't be drafted" note: drafts the AI brief again. */
+.briefRetryBtn {
+  margin-left: 0.25rem;
+  background: #fff;
+  border: 1px solid #e6b85c;
+  border-radius: 6px;
+  color: #b45309;
+  cursor: pointer;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: var(--font-size-sm);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.15rem 0.6rem;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.briefRetryBtn:hover:not(:disabled) {
+  background: #b45309;
+  border-color: #b45309;
+  color: #fff;
+}
+
+.briefRetryBtn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

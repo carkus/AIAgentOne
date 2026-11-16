@@ -29,7 +29,7 @@ Setup is four steps, drawn as a live process graph as you go:
 
 | Step | What happens |
 | --- | --- |
-| **Character** | Agent type (General tasks, Researcher, Job search), plus stackable personality and behaviour pills (Concise, Skeptical, Cite Sources, Proactive, …). |
+| **Character** | Agent type (General Task, Researcher, Job search), plus stackable personality and behaviour pills (Concise, Skeptical, Cite Sources, Proactive, …). |
 | **Focus** | The topics the agent works on. Smart Focus embeds them to flag near-duplicate topics and suggest related ones you've saved before. |
 | **Brief** | An LLM drafts a short brief interpreting what the chosen topics mean together, plus a graph of how the agent will approach the job. |
 | **Outputs** | The agent proposes 3–5 deliverables for the job (report, chart, spreadsheet, slide deck, …), with its own picks pre-ticked. |

@@ -623,6 +623,8 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
   // Why the AI brief failed (e.g. a 429), shown under the template fallback
   // so a quiet downgrade to the two-line brief is visible.
   const [briefError, setBriefError] = useState<string | null>(null)
+  // Bumped by the brief's Retry button to re-run the same request.
+  const [briefRetry, setBriefRetry] = useState(0)
   const [briefAnswer, setBriefAnswer] = useState('')
   // Media the Brief offered (aiBrief.relics) that the user has built. Tied
   // to the brief they came from, so a redrafted brief starts empty.
@@ -869,7 +871,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     }, 700)
     return () => window.clearTimeout(briefDebounceRef.current)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [briefInputsKey])
+  }, [briefInputsKey, briefRetry])
 
   // Proposes outputs when the Outputs step is open and the brief has
   // settled; a changed brief (or focus/character) proposes again and resets
@@ -1663,8 +1665,8 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                 row 1 is the name and model, row 2 the action strip (agent
                 controls left, location right). Save is always shown. */}
             <div className={ah.identity}>
-              <h1 className={ah.name}>Agent {agentName}</h1>
-              <div className={ah.meta}>
+              <h1 className={`${ah.name} ${styles.setupAgentName}`}>Agent {agentName}</h1>
+              <div className={`${ah.meta} ${styles.setupModelMeta}`}>
                 <button
                   type="button"
                   className={ah.metaItem}
@@ -1677,7 +1679,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
               </div>
             </div>
             <div className={ah.actions}>
-              <div className={ah.group} role="group" aria-label="Agent controls">
+              <div className={`${ah.group} ${styles.topTools}`} role="group" aria-label="Agent controls">
                 <button
                   type="button"
                   className={`${ah.btn} ${ah.btnText} ${poolOpen ? ah.btnOpen : ''}`}
@@ -2254,7 +2256,18 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                   {!aiBrief && briefError && !briefLoading && (
                     <p className={`${styles.focusWarnBox} ${styles.briefFallbackNote}`} role="status">
                       <span className={styles.focusWarnIcon} aria-hidden="true">⚠</span>{' '}
-                      Showing the basic brief: the AI brief couldn't be drafted ({briefError}).
+                      Showing the basic brief: the AI brief couldn't be drafted ({briefError}).{' '}
+                      <button
+                        type="button"
+                        className={styles.briefRetryBtn}
+                        onClick={() => {
+                          lastBriefInputsRef.current = ''
+                          setBriefRetry(n => n + 1)
+                        }}
+                        disabled={bootstrapping}
+                      >
+                        ↻ Retry
+                      </button>
                     </p>
                   )}
                   {briefLoading && (
@@ -2434,10 +2447,10 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
               disabled={bootstrapping}
               aria-disabled={keywords.length === 0}
               title={reusableConfig
-                ? 'Launch: this agent is already built from these steps, so it opens straight away'
+                ? 'Deploy: this agent is already built from these steps, so it opens straight away'
                 : 'Deploy: build the agent from these steps and start the job'}
             >
-              {bootstrapping ? 'Configuring…' : reusableConfig ? 'Launch >' : 'Deploy >'}
+              {bootstrapping ? 'Configuring…' : 'Deploy >'}
             </button>
             {bootstrapping && (
               <button
