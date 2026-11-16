@@ -1087,18 +1087,19 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
           onBackToSetup={onBackToSetup}
         />
       )}
+      {/* Goes back to the Setup/search screen — navigation only, unlike
+          "New agent" in the toolbar (which recommissions this same agent
+          and wipes its messages). A past version of this logo doubled as
+          that reset button, which silently lost the conversation; this
+          button calls a distinct onBackToSetup instead, so the chat
+          state itself is left untouched. */}
+      <button type="button" className={styles.headerLogoBtn} onClick={onBackToSetup} aria-label="Back to search">
+        <img src={splashLogo} alt="Agent One" className={styles.headerLogo} />
+      </button>
+      {/* The agent's page in one bordered card, as on Setup (.agentCard). */}
+      <div className={styles.card}>
       <header className={styles.header}>
-          {/* Goes back to the Setup/search screen — navigation only, unlike
-              "New agent" in the toolbar (which recommissions this same agent
-              and wipes its messages). A past version of this logo doubled as
-              that reset button, which silently lost the conversation; this
-              button calls a distinct onBackToSetup instead, so the chat
-              state itself is left untouched. */}
-          <button type="button" className={styles.headerLogoBtn} onClick={onBackToSetup} aria-label="Back to search">
-            <img src={splashLogo} alt="Agent One" className={styles.headerLogo} />
-          </button>
-        {/* The logo sits alone, centred, above the agent's header, as on
-            Setup. The header is shared with Setup (AgentHeader.module.css):
+        {/* The header is shared with Setup (AgentHeader.module.css):
             row 1 is the name and meta line, row 2 the action strip. */}
         <div className={`${ah.header} ${styles.headerBox}`}>
           <div className={ah.identity}>
@@ -1624,6 +1625,7 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
         </button>
       </form>
         </div>
+      </div>
       </div>
       {pdfPreview && (
         <PdfPreviewModal
