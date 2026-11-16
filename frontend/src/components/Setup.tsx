@@ -770,7 +770,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
       const content = await buildBriefRelic(suggestion, aiBrief.text, {
         agentType,
         keywords: [...keywords],
-        location: location.trim(),
+        location: usedLocation,
         traits: (PERSONALITY_TRAITS[agentType] ?? PERSONALITY_TRAITS.research).filter(t => selectedTraits.includes(t.id)).map(t => t.label),
         behaviors: BEHAVIOR_TOGGLES.filter(t => activeToggles.includes(t.id)).map(t => t.label),
         warning: aiBrief.warning,
