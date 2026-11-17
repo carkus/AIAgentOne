@@ -27,6 +27,7 @@ import { formatDate, getDateFormat } from '../dateFormat'
 import { extractMermaidDiagrams } from '../mermaidExtract'
 import AgentBriefingModal from './AgentBriefingModal'
 import styles from '../styles/Chat.module.css'
+import leaveStyles from '../styles/MobileNotice.module.css'
 import ah from '../styles/AgentHeader.module.css'
 import splashLogo from '../assets/favicon.png'
 
@@ -358,6 +359,15 @@ export default function Chat({ agentConfig, agentName, onReset, onNewAgent, onBa
   // Fresh agent: mission briefing. Resumed chat (initialMessages): an
   // in-character "Previously…" recap of the story so far.
   const [showBriefing, setShowBriefing] = useState(true)
+  // Going back to Setup asks first: keep this agent's Focus and character
+  // in the steps, or clear them all.
+  const [leaveOpen, setLeaveOpen] = useState(false)
+  useEffect(() => {
+    if (!leaveOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setLeaveOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [leaveOpen])
   const [thinking, setThinking] = useState(false)
   // What the backend says it's currently doing while `thinking` is true
   // (agent_stream.py's 'status' events) — shown in place of a bare "Working"
@@ -549,6 +559,36 @@ export default function Chat({ agentConfig, agentName, onReset, onNewAgent, onBa
       savedAt: Date.now(),
     }
   }
+
+  // Saved after every finished turn, so a reload or new tab reopens the
+  // conversation as it was. Skips the untouched resumed history on mount.
+  const initialMessagesRef = useRef(messages)
+  useEffect(() => {
+    if (thinking || messages.length === 0 || messages === initialMessagesRef.current) return
+    saveChatLocally()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, thinking])
+
+  // A file the user asked for (rule 7b, "requested": true) is built as soon
+  // as the reply lands, then opens in its preview to download. Requests
+  // already in a resumed chat aren't rebuilt on open.
+  const autoBuiltRef = useRef<Set<string> | null>(null)
+  if (autoBuiltRef.current === null) {
+    autoBuiltRef.current = new Set(messages.flatMap((m, i) =>
+      (m.relicSuggestions ?? []).filter(sg => sg.requested).map(sg => `${i}-${sg.kind}`)))
+  }
+  useEffect(() => {
+    if (thinking || relicBusy) return
+    const i = messages.length - 1
+    const msg = messages[i]
+    if (!msg || msg.role !== 'assistant' || msg.durationSeconds === undefined) return
+    const wanted = (msg.relicSuggestions ?? []).find(sg =>
+      sg.requested && !autoBuiltRef.current!.has(`${i}-${sg.kind}`) && !(msg.relics ?? []).some(r => r.kind === sg.kind))
+    if (!wanted) return
+    autoBuiltRef.current!.add(`${i}-${wanted.kind}`)
+    void handleBuildRelic(i, wanted.kind, wanted.reason)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, thinking, relicBusy])
 
   function saveChatLocally() {
     saveChat(buildSavedChat())
@@ -1203,8 +1243,32 @@ export default function Chat({ agentConfig, agentName, onReset, onNewAgent, onBa
           resumedMessages={initialMessages}
           onDirection={direction => sendMessage(direction, messages, undefined, undefined, true)}
           onClose={() => setShowBriefing(false)}
-          onBackToSetup={onBackToSetup}
+          onBackToSetup={() => { setShowBriefing(false); setLeaveOpen(true) }}
         />
+      )}
+      {leaveOpen && (
+        <div className={leaveStyles.overlay} onClick={() => setLeaveOpen(false)}>
+          <div
+            className={leaveStyles.modal}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="leave-to-setup-title"
+            onClick={e => e.stopPropagation()}
+          >
+            <h2 id="leave-to-setup-title" className={leaveStyles.title}>Back to Setup</h2>
+            <p className={leaveStyles.text}>
+              Keep this agent's Focus topics and character in the steps, or clear them all and start again?
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <button type="button" className={leaveStyles.button} onClick={() => { setLeaveOpen(false); onBackToSetup() }} autoFocus>
+                Keep
+              </button>
+              <button type="button" className={leaveStyles.button} onClick={() => { setLeaveOpen(false); onNewAgent() }}>
+                Clear
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       {/* Goes back to the Setup/search screen — navigation only, unlike
           "Recommission" (which restarts this same agent and wipes its
@@ -1212,7 +1276,7 @@ export default function Chat({ agentConfig, agentName, onReset, onNewAgent, onBa
           that reset button, which silently lost the conversation; this
           button calls a distinct onBackToSetup instead, so the chat
           state itself is left untouched. */}
-      <button type="button" className={styles.headerLogoBtn} onClick={onBackToSetup} aria-label="Back to search">
+      <button type="button" className={styles.headerLogoBtn} onClick={() => setLeaveOpen(true)} aria-label="Back to search">
         <img src={splashLogo} alt="Agent One" className={styles.headerLogo} />
       </button>
       {/* The agent's page in one bordered card, as on Setup (.agentCard). */}

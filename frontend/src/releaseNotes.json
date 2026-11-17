@@ -1,15 +1,77 @@
 {
   "_about": "Changes since the last deploy go in \"unreleased\", each tagged kind fix/feature/breaking. On deploy, tools/release-notes/release.py turns them into the next release (newest first) and sets the version. See CLAUDE.md, Versioning.",
   "unreleased": [
-    {"kind": "feature", "title": "AI methods document in Settings", "text": "Settings has a new **AI methods document** section: download a PDF of the AI features, approaches and methods used across the projects, with how each is used and what it does. When running locally it can also regenerate the PDF from each project's own docs."},
-    {"kind": "fix", "title": "Tidier Settings", "text": "Each setting in Settings now sits in its own box with its heading, with even spacing throughout."},
-    {"kind": "fix", "title": "New agent starts with no Focus topics", "text": "**New agent** on the deployment screen now goes back to Setup with the Focus topics cleared, so no brief starts drafting until you choose new ones. **Recommission** still restarts the same agent."},
-    {"kind": "feature", "title": "Edit a Focus topic in place", "text": "Click a selected Focus topic to edit its text; Enter or clicking away saves, Escape cancels. Saved Focus topics are unchanged."},
-    {"kind": "fix", "title": "Uppercase Focus topics on the deployment screen", "text": "The Focus topics shown under the deployment screen's top toolbar are now always in uppercase, in the same lighter steel blue as Focus topics in Setup."},
-    {"kind": "feature", "title": "Resume continues the last job", "text": "In **Load Agent**, a built profile's **Launch** button is now **Resume**. It opens the built agent and continues its last saved job, with no rebuild. **Recommission** on the deployment screen starts it fresh."},
-    {"kind": "feature", "title": "Resume a saved job", "text": "In **Load Agent**, a saved job now has a **Resume** button that continues that chat where it left off, with all its messages."}
+    {"kind": "fix", "title": "Graphs follow the newest step", "text": "When a step is added or updated in the brief graph, it scrolls to the right so the newest step is in view. Setup's process graph stays where it is, since its steps are how you move between pages."},
+    {"kind": "feature", "title": "Open a saved file from the reply", "text": "When an agent saves a file and names it in its reply, the file name is now a button that opens the file, instead of a path on the server."},
+    {"kind": "feature", "title": "Files you ask for are built for you", "text": "Asking an agent to save, export or download something (a template, document, spreadsheet) now builds a real file in the best format straight away, ready to preview and download. Agents no longer write their own save tool, which could report a file as saved when it was empty."},
+    {"kind": "fix", "title": "Rounder Character pills", "text": "The Type, Personality and Behaviour pills on the Character step are now white and fully rounded, matching the location pill beside Type."},
+    {"kind": "feature", "title": "Location per job", "text": "The location now sits under Type on the Character step. Each job starts with your location from Settings, can be given its own on the map, and keeps it when saved. A round tickbox beside it decides whether the agent uses it at all."},
+    {"kind": "feature", "title": "Model and Settings at the end of the header", "text": "The model and web search lines sit in a column at the right end of the agent header, in smaller plain text, with a Settings button beside them the same size as the toolbar buttons. The deployment page now has Settings too: a model, location or search change there applies from the agent's next reply."},
+    {"kind": "fix", "title": "Sub-headings in replies are dark blue", "text": "Third-level headings in an agent's reply (e.g. \"Key Features of This Template\") were near-black; they now use the same dark blue as the other headings."},
+    {"kind": "fix", "title": "A briefer brief", "text": "The written brief in Setup is now three short groups of dot points instead of three paragraphs, each under a heading written for that agent: what the topics add up to, how its character shapes the work, and what it will do. The bullets are larger than the text."},
+    {"kind": "feature", "title": "Brief choices you can click", "text": "When the brief spots a tension or gap in your Focus, it says how the agent will handle it and offers buttons to change course: **Lead with** a topic (the agent then frames the job around it), **Drop** one, or **Add** one. The brief no longer asks you to clarify things you can't type."}
   ],
   "releases": [
+    {
+      "version": "0.11.0",
+      "date": "17 November 2026",
+      "title": "4 new features, 3 fixes",
+      "groups": [
+        {
+          "title": "New",
+          "fixes": [
+            {
+              "title": "AI methods document in Settings",
+              "text": "Settings has a new **AI methods document** section: download a PDF of the AI features, approaches and methods used across the projects, with how each is used and what it does. When running locally it can also regenerate the PDF from each project's own docs."
+            },
+            {
+              "title": "Edit a Focus topic in place",
+              "text": "Click a selected Focus topic to edit its text; Enter or clicking away saves, Escape cancels. Saved Focus topics are unchanged."
+            },
+            {
+              "title": "Resume continues the last job",
+              "text": "In **Load Agent**, a built profile's **Launch** button is now **Resume**. It opens the built agent and continues its last saved job, with no rebuild. **Recommission** on the deployment screen starts it fresh."
+            },
+            {
+              "title": "Resume a saved job",
+              "text": "In **Load Agent**, a saved job now has a **Resume** button that continues that chat where it left off, with all its messages."
+            },
+            {
+              "kind": "feature",
+              "title": "Chats save themselves",
+              "text": "Every chat is now saved after each reply, so reloading the page or opening a new tab picks it up where you left off. **Settings → On reload or new tab** can switch this to start again at Setup instead."
+            },
+            {
+              "kind": "fix",
+              "title": "Settings button in the header",
+              "text": "On Setup, the **Settings** button now sits in the header to the right of the model and web search, slightly larger."
+            },
+            {
+              "kind": "feature",
+              "title": "Keep or clear when going back to Setup",
+              "text": "Going back to Setup from the deployment screen now asks whether to **Keep** the agent's Focus topics and character in the steps, or **Clear** them all and start again."
+            }
+          ]
+        },
+        {
+          "title": "Fixes",
+          "fixes": [
+            {
+              "title": "Tidier Settings",
+              "text": "Each setting in Settings now sits in its own box with its heading, with even spacing throughout."
+            },
+            {
+              "title": "New agent starts with no Focus topics",
+              "text": "**New agent** on the deployment screen now goes back to Setup with the Focus topics cleared, so no brief starts drafting until you choose new ones. **Recommission** still restarts the same agent."
+            },
+            {
+              "title": "Uppercase Focus topics on the deployment screen",
+              "text": "The Focus topics shown under the deployment screen's top toolbar are now always in uppercase, in the same lighter steel blue as Focus topics in Setup."
+            }
+          ]
+        }
+      ]
+    },
     {
       "version": "0.10.0",
       "date": "17 November 2026",

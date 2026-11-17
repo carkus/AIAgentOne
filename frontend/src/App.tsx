@@ -7,7 +7,7 @@ import MobileNotice from './components/MobileNotice'
 import ReleaseNotes from './components/ReleaseNotes'
 import type { AgentConfig, SavedChat } from './types'
 import { SURNAMES } from './surnames'
-import { getLastOpenedPointer, loadSavedChats, setLastOpenedPointer } from './chatStorage'
+import { getLastOpenedPointer, getReopenLastChat, loadSavedChats, setLastOpenedPointer } from './chatStorage'
 import { listPublishedAgents } from './api'
 
 // 'restoring' is a brief, render-nothing gate while the mount effect below
@@ -56,7 +56,8 @@ export default function App() {
   useEffect(() => {
     let cancelled = false
     async function restore() {
-      const pointer = getLastOpenedPointer()
+      // Settings can turn reopening off: start at Setup instead.
+      const pointer = getReopenLastChat() ? getLastOpenedPointer() : null
       if (pointer) {
         if (pointer.kind === 'savedChat') {
           const chat = loadSavedChats().find(c => c.id === pointer.id)

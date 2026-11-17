@@ -85,3 +85,24 @@ export function setLastOpenedPointer(pointer: LastOpenedPointer | null) {
     // reload just won't work this session, nothing else depends on it.
   }
 }
+
+// Settings → "On reload or new tab": reopen the last chat (default) or
+// start at Setup. Only skips the reopen; the pointer itself is kept.
+const REOPEN_KEY = 'aiagent_reopen_last_chat'
+
+export function getReopenLastChat(): boolean {
+  try {
+    return localStorage.getItem(REOPEN_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+
+export function setReopenLastChat(on: boolean) {
+  try {
+    if (on) localStorage.removeItem(REOPEN_KEY)
+    else localStorage.setItem(REOPEN_KEY, '0')
+  } catch {
+    // localStorage unavailable — the default (reopen) applies.
+  }
+}

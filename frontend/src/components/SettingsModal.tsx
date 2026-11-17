@@ -6,6 +6,7 @@ import {
 } from '../api'
 import { isTinyOllamaModel, isReasoningOllamaModel, shortCloudflareModel } from '../modelLabel'
 import { DATE_FORMAT_OPTIONS, type DateFormatId } from '../dateFormat'
+import { getReopenLastChat, setReopenLastChat } from '../chatStorage'
 import styles from '../styles/SettingsModal.module.css'
 
 // Mirrors backend/src/agent_stream.py's MAX_DELEGATIONS_PER_REQUEST — shown
@@ -82,6 +83,7 @@ export default function SettingsModal({
   disabled,
 }: Props) {
   const closeBtnRef = useRef<HTMLButtonElement>(null)
+  const [reopenLastChat, setReopenLastChatState] = useState(getReopenLastChat)
   const [mcpServers, setMcpServers] = useState<McpServerInfo[] | null>(null)
   const [aiMethods, setAiMethods] = useState<AiMethodsStatus | null>(null)
   const [aiRunning, setAiRunning] = useState(false)
@@ -157,6 +159,26 @@ export default function SettingsModal({
         </div>
 
         <div className={styles.body}>
+          <section className={styles.section}>
+            <span className={styles.sectionLabel}>On reload or new tab</span>
+            <select
+              className={styles.providerSelect}
+              value={reopenLastChat ? 'reopen' : 'restart'}
+              onChange={e => {
+                const on = e.target.value === 'reopen'
+                setReopenLastChat(on)
+                setReopenLastChatState(on)
+              }}
+            >
+              <option value="reopen">Continue the last chat</option>
+              <option value="restart">Start again at Setup</option>
+            </select>
+            <p className={styles.providerHint}>
+              Every chat is saved after each reply. Choose whether reloading the
+              page or opening a new tab takes you back into it or starts fresh.
+            </p>
+          </section>
+
           <section className={styles.section}>
             <span className={styles.sectionLabel}>Location</span>
             <div className={styles.locationRow}>

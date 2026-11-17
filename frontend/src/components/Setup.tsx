@@ -1547,11 +1547,11 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
   useEffect(() => {
     if (!activeAgentConfig) return
     applyAgentConfigToForm(activeAgentConfig, agentName)
-    // A new agent: no Focus (so no brief drafts itself), and Save makes a
-    // new profile rather than editing the job just left.
+    // Cleared on the way back (Chat's Keep/Clear, or New agent): no Focus
+    // (so no brief drafts itself), no personality or behaviours, and Save
+    // makes a new profile rather than editing the job just left.
     if (clearFocus) {
-      setKeywords([])
-      setRestoredOutputs(null)
+      resetSearch()
       return
     }
     // The open job, if it's been saved: Save then edits it rather than
