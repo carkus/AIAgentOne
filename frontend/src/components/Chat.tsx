@@ -321,6 +321,8 @@ interface Props {
   agentConfig: AgentConfig
   agentName: string
   onReset: () => void
+  // Header "New agent": back to Setup with the Focus topics cleared.
+  onNewAgent: () => void
   // Navigates back to the Setup/search screen without touching the current
   // conversation's state — distinct from onReset (which recommissions this
   // same agent, wiping its messages). Wired to the header logo below.
@@ -331,7 +333,7 @@ interface Props {
   chatId?: string
 }
 
-export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, initialMessages, chatId }: Props) {
+export default function Chat({ agentConfig, agentName, onReset, onNewAgent, onBackToSetup, initialMessages, chatId }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>(() => initialMessages ?? [])
   // The job's workers: sent with every turn so the backend reuses them, and
   // replaced by the team each `done` event returns. Saved with the chat.
@@ -1205,8 +1207,8 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
         />
       )}
       {/* Goes back to the Setup/search screen — navigation only, unlike
-          "New agent" in the toolbar (which recommissions this same agent
-          and wipes its messages). A past version of this logo doubled as
+          "Recommission" (which restarts this same agent and wipes its
+          messages). A past version of this logo doubled as
           that reset button, which silently lost the conversation; this
           button calls a distinct onBackToSetup instead, so the chat
           state itself is left untouched. */}
@@ -1292,9 +1294,9 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
             <button
               type="button"
               className={`${ah.btn} ${ah.btnText} ${ah.btnPrimary}`}
-              onClick={onReset}
+              onClick={onNewAgent}
               aria-label="New agent"
-              title="New agent — recommission a fresh agent, wiping this conversation"
+              title="New agent — back to Setup with the Focus topics cleared"
             >
               <ToolbarIcon name="newAgent" />
               <span>New agent</span>

@@ -1,43 +1,60 @@
 {
   "_about": "Changes since the last deploy go in \"unreleased\", each tagged kind fix/feature/breaking. On deploy, tools/release-notes/release.py turns them into the next release (newest first) and sets the version. See CLAUDE.md, Versioning.",
   "unreleased": [
-    {
-      "kind": "fix",
-      "title": "Brief questions stand out",
-      "text": "When the brief needs to ask you something, Setup opens the Brief step, and the Brief box in the build graph turns the same colour as the question."
-    },
-    {
-      "kind": "fix",
-      "title": "Model on the right in the deployment header",
-      "text": "On the deployment page the model and web search line now sit at the far right of the header, as they do on Setup."
-    },
-    {
-      "kind": "fix",
-      "title": "Case file before Where to next",
-      "text": "Under each answer, the case file and export bar now comes before the Where to next options, with a clear gap between them."
-    },
-    {
-      "kind": "feature",
-      "title": "Or ask a question",
-      "text": "Under the latest answer's Where to next options there is now a box to ask the agent your own question directly."
-    },
-    {
-      "kind": "fix",
-      "title": "Case file before the reply's Next steps",
-      "text": "When a reply ends with its own **Next steps** list, the Case file and export bar now sits above that list, so all the follow-up choices are together at the bottom."
-    },
-    {
-      "kind": "fix",
-      "title": "One name for the agent",
-      "text": "\"How this agent was made\" now gives the agent the same name as the header, instead of a second name the model made up. Agents built before this keep their old name there until they are rebuilt."
-    },
-    {
-      "kind": "fix",
-      "title": "Agents always show their web search",
-      "text": "If a General or Research agent's design comes back with no way to look things up, web search is now added when it's built, so it shows in the tool row and in \"How this agent was made\". The agent could already search while running; it just didn't show."
-    }
+    {"kind": "feature", "title": "AI methods document in Settings", "text": "Settings has a new **AI methods document** section: download a PDF of the AI features, approaches and methods used across the projects, with how each is used and what it does. When running locally it can also regenerate the PDF from each project's own docs."},
+    {"kind": "fix", "title": "Tidier Settings", "text": "Each setting in Settings now sits in its own box with its heading, with even spacing throughout."},
+    {"kind": "fix", "title": "New agent starts with no Focus topics", "text": "**New agent** on the deployment screen now goes back to Setup with the Focus topics cleared, so no brief starts drafting until you choose new ones. **Recommission** still restarts the same agent."},
+    {"kind": "feature", "title": "Edit a Focus topic in place", "text": "Click a selected Focus topic to edit its text; Enter or clicking away saves, Escape cancels. Saved Focus topics are unchanged."},
+    {"kind": "fix", "title": "Uppercase Focus topics on the deployment screen", "text": "The Focus topics shown under the deployment screen's top toolbar are now always in uppercase, in the same lighter steel blue as Focus topics in Setup."},
+    {"kind": "feature", "title": "Resume continues the last job", "text": "In **Load Agent**, a built profile's **Launch** button is now **Resume**. It opens the built agent and continues its last saved job, with no rebuild. **Recommission** on the deployment screen starts it fresh."},
+    {"kind": "feature", "title": "Resume a saved job", "text": "In **Load Agent**, a saved job now has a **Resume** button that continues that chat where it left off, with all its messages."}
   ],
   "releases": [
+    {
+      "version": "0.10.0",
+      "date": "17 November 2026",
+      "title": "1 new feature, 6 fixes",
+      "groups": [
+        {
+          "title": "New",
+          "fixes": [
+            {
+              "title": "Or ask a question",
+              "text": "Under the latest answer's Where to next options there is now a box to ask the agent your own question directly."
+            }
+          ]
+        },
+        {
+          "title": "Fixes",
+          "fixes": [
+            {
+              "title": "Brief questions stand out",
+              "text": "When the brief needs to ask you something, Setup opens the Brief step, and the Brief box in the build graph turns the same colour as the question."
+            },
+            {
+              "title": "Model on the right in the deployment header",
+              "text": "On the deployment page the model and web search line now sit at the far right of the header, as they do on Setup."
+            },
+            {
+              "title": "Case file before Where to next",
+              "text": "Under each answer, the case file and export bar now comes before the Where to next options, with a clear gap between them."
+            },
+            {
+              "title": "Case file before the reply's Next steps",
+              "text": "When a reply ends with its own **Next steps** list, the Case file and export bar now sits above that list, so all the follow-up choices are together at the bottom."
+            },
+            {
+              "title": "One name for the agent",
+              "text": "\"How this agent was made\" now gives the agent the same name as the header, instead of a second name the model made up. Agents built before this keep their old name there until they are rebuilt."
+            },
+            {
+              "title": "Agents always show their web search",
+              "text": "If a General or Research agent's design comes back with no way to look things up, web search is now added when it's built, so it shows in the tool row and in \"How this agent was made\". The agent could already search while running; it just didn't show."
+            }
+          ]
+        }
+      ]
+    },
     {
       "version": "0.9.0",
       "date": "17 November 2026",

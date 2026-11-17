@@ -19,6 +19,7 @@ interface Props {
   onLaunchDraft: (d: AgentDraft) => void
   onDeleteDraft: (id: string) => void
   onLoadChatDetails: (c: SavedChat) => void
+  onResumeChat: (c: SavedChat) => void
   onHideChat: (id: string) => void
 }
 
@@ -56,7 +57,7 @@ function entryKeywords(e: Entry): string[] {
 // reloads its built agent into the steps; neither opens the chat.
 export default function AgentPool({
   drafts, chats, formatDate, editing, disabled,
-  onLoadDraft, onLaunchDraft, onDeleteDraft, onLoadChatDetails, onHideChat,
+  onLoadDraft, onLaunchDraft, onDeleteDraft, onLoadChatDetails, onResumeChat, onHideChat,
 }: Props) {
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
@@ -102,8 +103,9 @@ export default function AgentPool({
         {howOpen && (
           <ul className={styles.howList}>
             <li><strong>Every agent you deploy is kept here</strong>, already built, so you don't wait for it to be built again.</li>
-            <li><strong>Profile → Launch:</strong> opens that built agent straight away with a fresh conversation. No brief, no build.</li>
+            <li><strong>Profile → Resume:</strong> opens that built agent straight away and continues its last saved job. No brief, no build. With no saved job it opens on an empty conversation. Recommission on the deployment screen starts it fresh.</li>
             <li><strong>Profile → Load:</strong> fills every step again: type, Focus, personality, behaviours, location and outputs. If you change nothing, Deploy becomes Launch and opens the built agent at once. Change a step and it is built again.</li>
+            <li><strong>Job → Resume:</strong> continues that chat where it left off, with all its messages.</li>
             <li><strong>Job → Load:</strong> reloads that job's agent into the steps, already built. Launch starts it on a fresh conversation with no rebuild. Change a step and it is built again, or Save to update the job.</li>
             <li><strong>Save</strong> (the disk icon under the agent's name) adds what you're building here, or updates the one you loaded.</li>
             <li>Profiles are kept on the server, so they're in any browser. Jobs are kept in this browser only.</li>
@@ -181,8 +183,8 @@ export default function AgentPool({
                   <div className={styles.actions}>
                     {d.builtConfig && (
                       <button type="button" className={styles.primaryBtn} onClick={() => onLaunchDraft(d)} disabled={disabled}
-                        title="Open this built agent straight away, with no rebuild">
-                        Launch
+                        title="Open this built agent and continue its last saved job, with no rebuild">
+                        Resume
                       </button>
                     )}
                     <button type="button" className={d.builtConfig ? styles.secondaryBtn : styles.primaryBtn} onClick={() => onLoadDraft(d)} disabled={disabled}
@@ -244,7 +246,11 @@ export default function AgentPool({
                 )}
                 {preview && <span className={styles.preview}>{preview}</span>}
                 <div className={styles.actions}>
-                  <button type="button" className={styles.primaryBtn} onClick={() => onLoadChatDetails(c)} disabled={disabled}
+                  <button type="button" className={styles.primaryBtn} onClick={() => onResumeChat(c)} disabled={disabled}
+                    title="Continue this chat where it left off">
+                    Resume
+                  </button>
+                  <button type="button" className={styles.secondaryBtn} onClick={() => onLoadChatDetails(c)} disabled={disabled}
                     title="Reload this agent into the Setup steps, already built">
                     Load
                   </button>

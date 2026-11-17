@@ -153,6 +153,49 @@ def web_search_status():
         return jsonify({"active": None, "paused": []})
 
 
+@app.route("/models/ai-methods", methods=["GET", "OPTIONS"])
+def ai_methods_status():
+    """Settings' "AI methods document": the PDF is always downloadable (a
+    static file shipped with the frontend); regenerating it needs the local
+    workspace, so `regenerate` is False on the droplet."""
+    if request.method == "OPTIONS":
+        return "", 204
+    import ai_methods
+    updated = None
+    if ai_methods.CONTENT.is_file():
+        try:
+            updated = ai_methods.load_content().get("updated")
+        except Exception:
+            pass
+    return jsonify({"regenerate": ai_methods.available(), "pdf": ai_methods.PDF_URL, "updated": updated})
+
+
+@app.route("/models/ai-methods/regenerate", methods=["POST", "OPTIONS"])
+def ai_methods_regenerate():
+    if request.method == "OPTIONS":
+        return "", 204
+    import ai_methods
+    if not ai_methods.available():
+        return jsonify({"error": "Regenerating needs the local workspace."}), 404
+    body = request.get_json(silent=True) or {}
+    provider = (body.get("provider") or "").strip() or None
+    model = (body.get("ollama_model") or "").strip() or None
+
+    def generate():
+        try:
+            for event in ai_methods.regenerate_stream(provider, model):
+                yield json.dumps(event) + "\n"
+        except Exception as e:
+            app.logger.warning("ai methods regenerate failed: %s", e)
+            yield json.dumps({"type": "error", "message": str(e)}) + "\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="application/x-ndjson",
+        headers={"X-Accel-Buffering": "no"},
+    )
+
+
 @app.route("/brief", methods=["POST", "OPTIONS"])
 def brief():
     if request.method == "OPTIONS":

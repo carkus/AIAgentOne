@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ArmStat, LlmProvider, SearchDefaults } from '../types'
-import { listMcpTools, type McpServerInfo } from '../api'
+import {
+  AI_METHODS_PDF, fetchAiMethodsStatus, listMcpTools, regenerateAiMethods,
+  type AiMethodsStatus, type McpServerInfo,
+} from '../api'
 import { isTinyOllamaModel, isReasoningOllamaModel, shortCloudflareModel } from '../modelLabel'
 import { DATE_FORMAT_OPTIONS, type DateFormatId } from '../dateFormat'
 import styles from '../styles/SettingsModal.module.css'
@@ -80,6 +83,35 @@ export default function SettingsModal({
 }: Props) {
   const closeBtnRef = useRef<HTMLButtonElement>(null)
   const [mcpServers, setMcpServers] = useState<McpServerInfo[] | null>(null)
+  const [aiMethods, setAiMethods] = useState<AiMethodsStatus | null>(null)
+  const [aiRunning, setAiRunning] = useState(false)
+  const [aiStatus, setAiStatus] = useState<string | null>(null)
+  const [aiNotes, setAiNotes] = useState<{ name: string; note: string }[]>([])
+  const [aiError, setAiError] = useState<string | null>(null)
+  // Cache-buster for the download link once a regenerate has rebuilt the PDF.
+  const [aiStamp, setAiStamp] = useState<number | null>(null)
+
+  async function handleRegenerateAiMethods() {
+    setAiRunning(true)
+    setAiError(null)
+    setAiNotes([])
+    setAiStatus('Starting…')
+    const model = provider === 'cloudflare' ? cloudflareModel : provider === 'ollama' ? ollamaModel : null
+    try {
+      const done = await regenerateAiMethods(provider ?? undefined, model, event => {
+        if (event.type === 'status') setAiStatus(event.message)
+        if (event.type === 'section') setAiNotes(prev => [...prev, { name: event.name, note: event.note }])
+      })
+      setAiStatus(done.changed ? 'Done: the PDF was rebuilt with the changes below.' : 'Done: nothing changed; the PDF was rebuilt as it was.')
+      setAiStamp(Date.now())
+      setAiMethods(prev => prev ? { ...prev, updated: done.updated } : prev)
+    } catch (e) {
+      setAiStatus(null)
+      setAiError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAiRunning(false)
+    }
+  }
 
   // Accessible-overlay basics: focus moves into the dialog on open, Escape
   // dismisses it — this app has no other dialog to mirror, so this is the
@@ -101,6 +133,7 @@ export default function SettingsModal({
     if (!isOpen) return
     let cancelled = false
     listMcpTools().then(servers => { if (!cancelled) setMcpServers(servers) })
+    fetchAiMethodsStatus().then(status => { if (!cancelled) setAiMethods(status) })
     return () => { cancelled = true }
   }, [isOpen])
 
@@ -394,6 +427,46 @@ export default function SettingsModal({
             <p className={styles.providerHint}>
               Read-only — the vetted servers bootstrap can pick real tools from
               instead of writing a Python implementation (backend/src/mcp_registry.py).
+            </p>
+          </section>
+
+          <section className={styles.section}>
+            <span className={styles.sectionLabel}>AI methods document</span>
+            <div className={styles.locationRow}>
+              <a
+                className={styles.linkBtn}
+                href={`${aiMethods?.pdf ?? AI_METHODS_PDF}${aiStamp ? `?v=${aiStamp}` : ''}`}
+                target="_blank"
+                rel="noreferrer"
+                download
+              >
+                ⬇ Download PDF
+              </a>
+              {aiMethods?.regenerate && (
+                <button
+                  type="button"
+                  className={styles.detectBtn}
+                  onClick={handleRegenerateAiMethods}
+                  disabled={aiRunning}
+                >
+                  {aiRunning ? 'Regenerating…' : '↻ Regenerate from projects'}
+                </button>
+              )}
+            </div>
+            {aiStatus && <p className={styles.providerHint}>{aiStatus}</p>}
+            {aiError && <p className={styles.providerWarning}>⚠ {aiError}</p>}
+            {aiNotes.length > 0 && (
+              <ul className={`${styles.providerHint} ${styles.aiMethodsLog}`}>
+                {aiNotes.map(n => <li key={n.name}><strong>{n.name}</strong>: {n.note}</li>)}
+              </ul>
+            )}
+            <p className={styles.providerHint}>
+              The AI features, approaches and methods used across the projects:
+              per project, how each is used and what it does
+              {aiMethods?.updated ? ` (content from ${aiMethods.updated})` : ''}.
+              {aiMethods?.regenerate
+                ? ' Regenerate rereads each project\'s CLAUDE.md, AGENTS.md and README with the model chosen above, updates tools/ai-methods/content.json and rebuilds the PDF. It takes a few minutes; review the change with git diff. The live site gets the new PDF on the next frontend deploy.'
+                : ' Regenerating is only available when running locally.'}
             </p>
           </section>
         </div>

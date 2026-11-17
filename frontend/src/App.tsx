@@ -40,6 +40,9 @@ export default function App() {
   // Bumped on every bootstrap so Chat remounts with fresh internal
   // state (messages, chatIdRef) instead of reusing a stale instance.
   const [chatKey, setChatKey] = useState(0)
+  // Chat's "New agent": Setup opens on the agent just used but with no Focus
+  // topics, so its brief doesn't start drafting before any are chosen.
+  const [freshFocus, setFreshFocus] = useState(false)
   // Set only when jumping straight into Chat from a saved chat (skipping
   // bootstrap entirely) — cleared on the next fresh bootstrap or reset so a
   // resumed conversation's history doesn't leak into an unrelated agent.
@@ -142,6 +145,12 @@ export default function App() {
   // agentConfig on the next bootstrap; nothing here deletes the current
   // conversation.
   function handleBackToSetup() {
+    setFreshFocus(false)
+    setPhase('setup')
+  }
+
+  function handleNewAgent() {
+    setFreshFocus(true)
     setPhase('setup')
   }
 
@@ -175,6 +184,7 @@ export default function App() {
           onError={handleBootstrapError}
           onResumeChat={handleResumeChat}
           activeAgentConfig={agentConfig}
+          clearFocus={freshFocus}
           onOpenAdvanced={() => setPhase('advanced')}
         />
       ) : agentConfig ? (
@@ -183,6 +193,7 @@ export default function App() {
           agentConfig={agentConfig}
           agentName={agentName}
           onReset={handleReset}
+          onNewAgent={handleNewAgent}
           onBackToSetup={handleBackToSetup}
           initialMessages={resumedChat?.messages}
           chatId={resumedChat?.id}

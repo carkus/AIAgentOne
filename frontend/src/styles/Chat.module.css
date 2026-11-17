@@ -187,13 +187,15 @@
 
 .headerChip {
   align-items: center;
-  background: #e6f2f1;
-  border: 1px solid #bfccd8;
+  /* Same colours as Setup's .behaviorIconBtn (Setup.module.css). */
+  background: rgba(5, 55, 80, 0.06);
+  border: 1px solid rgba(5, 55, 80, 0.25);
   border-radius: var(--radius-control);
-  color: #284b6a;
+  color: rgba(5, 55, 80, 0.6);
   display: inline-flex;
   font-size: 0.75rem;
   padding: 0.15rem 0.5rem;
+  text-transform: uppercase;
 }
 
 /* Same row chrome as .headerKeywords just above it — a thumbnail strip of

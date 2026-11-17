@@ -229,13 +229,19 @@
 }
 
 .focusPill {
-  background: rgba(40, 75, 106, 0.1);
-  color: var(--color-accent);
+  /* Same colours as Setup's .behaviorIconBtn and Chat's .headerChip. */
+  background: rgba(5, 55, 80, 0.06);
+  border: 1px solid rgba(5, 55, 80, 0.25);
+  color: rgba(5, 55, 80, 0.6);
+  text-transform: uppercase;
 }
 
 .characterPill {
+  /* Same colours as Setup's .behaviorToggleActive (a selected Personality pill). */
   background: #f0e9d2;
+  border: 1px solid #ddd0a5;
   color: var(--color-dossier-text);
+  text-transform: uppercase;
 }
 
 .actions {

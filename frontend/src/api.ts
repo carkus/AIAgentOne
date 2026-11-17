@@ -489,6 +489,87 @@ export async function fetchWebSearchStatus(): Promise<{ active: string | null; p
   }
 }
 
+export interface AiMethodsStatus {
+  regenerate: boolean;
+  pdf: string;
+  updated: string | null;
+}
+
+export const AI_METHODS_PDF = '/docs/AI_Methods_Across_Projects.pdf';
+
+/** Settings' "AI methods document". The PDF itself is a static file shipped
+ * with the frontend, so the download works even when this call fails;
+ * `regenerate` is only true on local dev (backend/src/ai_methods.py). */
+export async function fetchAiMethodsStatus(): Promise<AiMethodsStatus> {
+  const fallback: AiMethodsStatus = { regenerate: false, pdf: AI_METHODS_PDF, updated: null };
+  try {
+    const res = await fetch(`${API_URL}/models/ai-methods`);
+    if (!res.ok) return fallback;
+    const data = await res.json();
+    return {
+      regenerate: data.regenerate === true,
+      pdf: typeof data.pdf === 'string' ? data.pdf : AI_METHODS_PDF,
+      updated: typeof data.updated === 'string' ? data.updated : null,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+export type AiMethodsEvent =
+  | { type: 'status'; message: string }
+  | { type: 'section'; name: string; note: string }
+  | { type: 'done'; changed: boolean; pdf: string; updated: string | null }
+  | { type: 'error'; message: string };
+
+/** Rereads each project's docs, updates the PDF's content and rebuilds it,
+ * streaming progress. Resolves with the `done` event; throws on `error`. */
+export async function regenerateAiMethods(
+  provider: LlmProvider | undefined,
+  model: string | null | undefined,
+  onEvent: (event: AiMethodsEvent) => void,
+): Promise<Extract<AiMethodsEvent, { type: 'done' }>> {
+  const res = await fetch(`${API_URL}/models/ai-methods/regenerate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider: provider ?? undefined, ollama_model: model ?? undefined }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error ?? 'Regenerate failed');
+  }
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('No response body');
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let done: Extract<AiMethodsEvent, { type: 'done' }> | null = null;
+  let errorMessage: string | null = null;
+  const handle = (line: string) => {
+    if (!line.trim()) return;
+    let event: AiMethodsEvent;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      return;
+    }
+    onEvent(event);
+    if (event.type === 'done') done = event;
+    if (event.type === 'error') errorMessage = event.message;
+  };
+  while (true) {
+    const { value, done: finished } = await reader.read();
+    if (finished) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    lines.forEach(handle);
+  }
+  handle(buffer);
+  if (errorMessage) throw new Error(errorMessage);
+  if (!done) throw new Error('Regenerate ended without a result');
+  return done;
+}
+
 export async function fetchFile(filename: string): Promise<string> {
   const res = await fetch(`${API_URL}/file/${encodeURIComponent(filename)}`);
   if (!res.ok) throw new Error('File not found');

@@ -1,0 +1,650 @@
+{
+  "title": "AI Methods Across Projects",
+  "author": "Mark Scicluna",
+  "subtitle": "AI features, approaches and methods by project: how each is used and what it does",
+  "updated": "2026-11-17",
+  "projects": [
+    {
+      "name": "AgentOne",
+      "sources": [
+        "AgentOne"
+      ],
+      "tag": "Python (Flask) + React/Vite · live at agent.carkus.com",
+      "what": "A self-scaffolding agent platform. The user describes a goal in plain language; an LLM designs the agent (system prompt, tool schemas and Python tool code) at runtime, then the agent runs as that purpose-built agent. Agents lead teams of worker agents and can be published as MCP tools for other apps to call.",
+      "rows": [
+        {
+          "method": "Self-scaffolding agents (meta-prompting / code generation)",
+          "how": "A bootstrap call returns a JSON AgentConfig: persona, system prompt, tool definitions and Python implementations.",
+          "does": "Turns a plain-language purpose into a working, purpose-built agent with no code changes between use cases."
+        },
+        {
+          "method": "Agentic tool-use loop",
+          "how": "LLM call → tool calls → results fed back → repeat until the model ends its turn; streamed to the UI as NDJSON events.",
+          "does": "Lets the agent research, fetch, compute and save files on its own, with live progress shown."
+        },
+        {
+          "method": "Multi-agent orchestration",
+          "how": "Main agent delegates sub-tasks to worker agents (each bootstrapped the same way), run concurrently in a thread pool; split by angle or by topic.",
+          "does": "Parallel research by a team; the main agent then writes a synthesised report across workers' findings."
+        },
+        {
+          "method": "RAG few-shot grounding",
+          "how": "Past purpose → config pairs are embedded (Gemini / nomic-embed-text) and retrieved by cosine similarity into the bootstrap prompt.",
+          "does": "New agents are designed from proven examples instead of from scratch each time."
+        },
+        {
+          "method": "MCP client (tool use via Model Context Protocol)",
+          "how": "A vetted registry of MCP servers (time, fetch, Tavily and Exa web search) offered to the model; calls routed to the real servers.",
+          "does": "Agents pick real, trusted tools instead of writing their own; search fails over Tavily → Exa on quota limits."
+        },
+        {
+          "method": "MCP server (agents as tools)",
+          "how": "A separate Streamable-HTTP MCP process exposes every published agent as one callable tool.",
+          "does": "Claude Desktop, Claude Code, jobfit or another app can call an AgentOne agent directly."
+        },
+        {
+          "method": "LLM provider cascade",
+          "how": "Gemini → Cloudflare Workers AI (hosted Qwen) → Ollama (local); quota errors pause a provider until reset.",
+          "does": "Keeps the app answering when a provider is down, rate-limited or out of credit."
+        },
+        {
+          "method": "Reinforcement learning: UCB1 multi-armed bandit",
+          "how": "Each (provider, model) pair is an arm, rewarded by self-evaluation pass/fail history.",
+          "does": "Recommends the best-performing model on the Setup screen while still exploring untried ones."
+        },
+        {
+          "method": "LLM-as-judge self-evaluation",
+          "how": "Checks on bootstrap output, chat replies, tool calls and worker delegation, each recorded with the model that produced it.",
+          "does": "Measures quality per model and feeds the bandit; flags weak replies."
+        },
+        {
+          "method": "Output guardrail (scope guard)",
+          "how": "A separate, tool-less judge call screens replies against the out-of-scope list; one regenerate, then a code-written decline.",
+          "does": "Hard-to-bypass topic restriction that isn't swayed by multi-turn persuasion or injected page text."
+        },
+        {
+          "method": "Static validation of generated code",
+          "how": "Compile check, AST scan for undefined names, regex for forbidden calls and fake local endpoints; one retry then drop the tool.",
+          "does": "Catches hallucinated helper calls at build time instead of failing mid-chat."
+        },
+        {
+          "method": "Sandboxed execution of generated code",
+          "how": "Each tool call runs in a fresh child process: scrubbed environment, timeout, rlimits, network namespace, import allowlist.",
+          "does": "Makes running model-written code safe enough to expose publicly."
+        },
+        {
+          "method": "Layered spec enforcement (soft vs hard limits)",
+          "how": "Structured spec routed to prompt (meaning), post-generation fixes and a runtime tool allow-list gate (mechanical).",
+          "does": "Guarantees what code can guarantee (tools, limits, names) and is honest about what only the prompt can ask."
+        },
+        {
+          "method": "Structured output + targeted repair",
+          "how": "JSON schema in the prompt; on a JSONDecodeError the correction retry gets a hint matched to the error shape.",
+          "does": "Reliable machine-readable configs from free-text models."
+        },
+        {
+          "method": "Embedding similarity (Smart Focus)",
+          "how": "Focus topics embedded and compared against each other and saved topics, with per-model thresholds.",
+          "does": "Flags near-duplicate topics and suggests related ones before an agent is built."
+        },
+        {
+          "method": "Planning: brief and deliverables",
+          "how": "Model writes a brief of the job and proposes 3–5 deliverables (report, chart, spreadsheet…); code guarantees the chosen outputs.",
+          "does": "Moves the product from 'a chat' toward a set of useful outputs the agent judges best for the job."
+        },
+        {
+          "method": "Offline evaluation harness",
+          "how": "Fixed cases × model arms × repeats, with tool responses recorded once and replayed; fixed judge model; published scoreboard.",
+          "does": "Repeatable, like-for-like model comparison (pass rate, latency, tokens, cost per task)."
+        },
+        {
+          "method": "Observability: run tracing",
+          "how": "Timed spans for every LLM call, tool and worker (tokens, model, latency) streamed to the UI and the server log.",
+          "does": "The 'case file' view shows exactly how each answer and each agent was produced."
+        },
+        {
+          "method": "Generative visuals",
+          "how": "Agents answer with Mermaid diagrams where they beat prose; image generation via Gemini → Hugging Face cascade.",
+          "does": "Charts, flows and images instead of walls of text."
+        }
+      ]
+    },
+    {
+      "name": "jobfit (JobFit AI)",
+      "sources": [
+        "jobfit"
+      ],
+      "tag": "ASP.NET Core (.NET 10) + TypeScript SPA · live at jobfit.carkus.com",
+      "what": "An authenticated job-fit trainer: build a profile, paste or search for a job, get an honest fit appraisal with gaps, a cover letter, a job-targeted CV PDF and a training plan.",
+      "rows": [
+        {
+          "method": "Multi-provider cascade",
+          "how": "AgentOne (MCP) → ChattyPrayers gateway → OpenAI → Anthropic → Gemini → Ollama; availability via free health pings cached 5 minutes.",
+          "does": "Always gets an answer from the best available provider without paying for availability checks."
+        },
+        {
+          "method": "Parallel multi-model ensemble",
+          "how": "The recommendation discussion runs every available provider concurrently (Task.WhenAll) and combines them.",
+          "does": "Several independent model opinions on the same appraisal."
+        },
+        {
+          "method": "Schema-first prompting + validation",
+          "how": "A concrete JSON example in the prompt; typed parser validates it; one correction-prompt retry; heuristic fallback.",
+          "does": "Appraisals that are always well-formed, even when a model misbehaves."
+        },
+        {
+          "method": "Deterministic scoring outside the model",
+          "how": "Fit score and label are computed in code from the parsed gaps, never trusted from the model.",
+          "does": "Consistent, explainable scores across providers."
+        },
+        {
+          "method": "Prompt library, temperature and model tier per task",
+          "how": "Named prompt templates; 0.3 for appraisal, 0.5–0.65 for writing; cheaper models for discussion and ranking.",
+          "does": "Right balance of determinism, creativity and cost for each job."
+        },
+        {
+          "method": "Grounded generation with honesty rules",
+          "how": "Tailored CV and cover letter may only use facts from the profile; contact details come from the profile, not the AI.",
+          "does": "Rewrites and prioritises a CV for a role without fabrication."
+        },
+        {
+          "method": "LLM ranking and classification",
+          "how": "Adzuna listings scored by the model: match score, fit note, skills, scam/junk flag, on-target check; keyword heuristic fallback.",
+          "does": "A ranked, de-junked job feed matched to the user's profile."
+        },
+        {
+          "method": "Information extraction",
+          "how": "A job posting URL is fetched and the model extracts the job description.",
+          "does": "Paste a link instead of the whole ad."
+        },
+        {
+          "method": "Scheduled and email-triggered AI pipelines",
+          "how": "Background service sends a daily PDF digest; an HMAC-signed 'Express interest' link generates and emails a tailored CV and cover letter.",
+          "does": "AI work happens without opening the app."
+        },
+        {
+          "method": "Token and latency capture",
+          "how": "AsyncLocal capture of input/output tokens and latency per call, shown in the UI.",
+          "does": "Cost and speed visibility per request."
+        },
+        {
+          "method": "MCP server and client",
+          "how": "Exposes analyze_job_fit, generate_cover_letter, fetch_job_from_url, search_jobs over MCP; calls AgentOne's agent as an MCP client.",
+          "does": "Usable from Claude Desktop/Code; first cross-project agent link."
+        }
+      ]
+    },
+    {
+      "name": "ChattyPrayers.Api",
+      "sources": [
+        "ChattyPrayers.Api",
+        "ChattyPrayers",
+        "AI_WORKSPACE.md#ChattyPrayers.Api"
+      ],
+      "tag": "ASP.NET Core · live at api.carkus.com · backend for AiChat, Moot, Horus, CV_carkus",
+      "what": "The shared LLM backend for several sites and apps: streaming chat, dialogue, debate, SVG generation and the public 'ask about Mark' widget, plus an MCP gateway any site can call.",
+      "rows": [
+        {
+          "method": "Provider abstraction + cascade",
+          "how": "ILlmProvider with Anthropic, Gemini and Ollama implementations; Claude → Gemini → Ollama with every failure logged.",
+          "does": "One reliable LLM service shared by every front end."
+        },
+        {
+          "method": "Streaming (SSE)",
+          "how": "Provider streams (incl. Ollama NDJSON) forwarded as Server-Sent Events.",
+          "does": "Replies appear word by word."
+        },
+        {
+          "method": "Model routing by mode",
+          "how": "Haiku for chat; Sonnet for summary, dialogue and debate.",
+          "does": "Matches model cost to task difficulty."
+        },
+        {
+          "method": "RAG: semantic conversation search",
+          "how": "Ollama nomic-embed-text embeddings; per-user in-memory vector index; cosine similarity ranking.",
+          "does": "Find past conversations by meaning, not keywords."
+        },
+        {
+          "method": "Live context injection",
+          "how": "Weather (Open-Meteo) and news (RSS) fetched in parallel and appended to the system prompt; failures silently skipped.",
+          "does": "Timely, situation-aware replies."
+        },
+        {
+          "method": "Structured generation with correction retry",
+          "how": "SVG output extracted from the raw reply; one correction prompt if no valid <svg> is found.",
+          "does": "Usable generated graphics."
+        },
+        {
+          "method": "Safety layer and prompt-injection resistance",
+          "how": "A base safety prompt on every request; the public widget is pinned to a fixed fact block and declines off-topic or override attempts.",
+          "does": "Safe public exposure, grounded answers about one person."
+        },
+        {
+          "method": "Cost control for anonymous traffic",
+          "how": "Per-IP rate limits and the cheap model tier on public endpoints.",
+          "does": "Bounds spend from unauthenticated visitors."
+        },
+        {
+          "method": "MCP gateway server",
+          "how": "generate_completion tool over MCP, backed by the cascade, gated by per-consumer API keys.",
+          "does": "Any site gets cascaded, fallback-safe LLM text without its own provider code."
+        }
+      ]
+    },
+    {
+      "name": "ComfyUI Claude Assistant",
+      "sources": [
+        "ComfyUI/custom_nodes/claude_assistant",
+        "AI_WORKSPACE.md#ComfyUI"
+      ],
+      "tag": "ComfyUI custom node · Python (aiohttp) + JavaScript panel",
+      "what": "Lets Claude read and edit a live ComfyUI image-generation node graph from a chat panel, and adds a node that calls Claude while a workflow runs.",
+      "rows": [
+        {
+          "method": "Schema-grounded tool use",
+          "how": "Model gets the current graph plus live node schemas, and edits via apply_graph_actions / lookup_node_types tools.",
+          "does": "Correct graph edits based on real node definitions, not guessed names."
+        },
+        {
+          "method": "Goal → subgraph planner (human in the loop)",
+          "how": "plan_subtasks decomposes a goal into dependency-linked steps shown to the user, then each step is built and wired.",
+          "does": "Builds a working pipeline from one sentence, with review first."
+        },
+        {
+          "method": "Agent loop on stop_reason",
+          "how": "Keeps calling the model while it signals tool use, rather than keying on specific tool names.",
+          "does": "Multi-step builds actually finish."
+        },
+        {
+          "method": "LLM inside the pipeline",
+          "how": "ClaudeAssistantNode runs mid-workflow and returns text, int and float outputs.",
+          "does": "AI-written prompts or numeric settings feed diffusion nodes."
+        },
+        {
+          "method": "Persistent per-workflow memory",
+          "how": "Chat history and notes stored beside each workflow and folded into the system prompt.",
+          "does": "Context stays with the right workflow."
+        }
+      ]
+    },
+    {
+      "name": "baby-meta-agent",
+      "sources": [
+        "baby-meta-agent",
+        "AI_WORKSPACE.md#baby-meta-agent"
+      ],
+      "tag": "Python · local-only (llama.cpp GGUF) · educational",
+      "what": "A from-scratch, no-framework agent course (13 lessons) ending in goal-driven swarms of sub-agents.",
+      "rows": [
+        {
+          "method": "Atom-of-Thought planning",
+          "how": "A goal is decomposed into a dependency graph of subtasks.",
+          "does": "Breaks complex goals into ordered, connected steps."
+        },
+        {
+          "method": "Dynamic tool selection",
+          "how": "A structured-JSON call picks tools per subtask from the registry (@tool decorator).",
+          "does": "Toolset decided per step, nothing fixed in advance."
+        },
+        {
+          "method": "Scoped sub-agents with code-enforced permissions",
+          "how": "A fresh Agent per node with allowed_tools; out-of-scope calls raise PermissionError.",
+          "does": "Least-privilege agents; results flow between dependent nodes."
+        },
+        {
+          "method": "Local-first LLM",
+          "how": "One shared local GGUF model, no cloud APIs.",
+          "does": "Fully private, offline agent stack."
+        }
+      ]
+    },
+    {
+      "name": "Globetrotter (tourguide / tourguide_flutter)",
+      "sources": [
+        "tourguide",
+        "tourguide_flutter"
+      ],
+      "tag": "Expo React Native app + Flutter port",
+      "what": "A location-based tour guide with an AI 'Plan my day' itinerary feature.",
+      "rows": [
+        {
+          "method": "Constrained selection (anti-hallucination)",
+          "how": "Gemini may only choose and order places from a candidate list already fetched from OpenStreetMap.",
+          "does": "Itineraries that never invent a place."
+        },
+        {
+          "method": "Structured output + validation",
+          "how": "Stops returned as JSON with times relative to start; place ids, overlaps and deadlines checked; one retry.",
+          "does": "A trustworthy, mappable day plan."
+        },
+        {
+          "method": "Prompt sizing",
+          "how": "Candidates capped to the 40 nearest.",
+          "does": "Small prompts and meaningful choices."
+        }
+      ]
+    },
+    {
+      "name": "Persona apps: Moot, AiChat, Horus, CV_carkus",
+      "sources": [
+        "Moot",
+        "AiChat",
+        "Horus",
+        "CV_carkus",
+        "AI_WORKSPACE.md#Moot"
+      ],
+      "tag": "Blazor WASM (Moot, AiChat, CV_carkus) · Expo React Native (Horus)",
+      "what": "Front ends on ChattyPrayers.Api for conversations with AI personalities, debates and dialogues.",
+      "rows": [
+        {
+          "method": "Persona prompting",
+          "how": "Library of personality system prompts (e.g. Warm Counsellor, Wise Elder) and modes: chat, reflection, letter.",
+          "does": "Distinct characters with consistent voices."
+        },
+        {
+          "method": "Multi-persona dialogue and debate",
+          "how": "Several personas take turns on one topic (Moot).",
+          "does": "AI-vs-AI discussion from different viewpoints."
+        },
+        {
+          "method": "Second-pass post-processing",
+          "how": "Moot's AiPostProcessor runs a reusable follow-up call (e.g. Summariser), preserving SVG/maths blocks around it.",
+          "does": "Clean summaries without breaking embedded content."
+        }
+      ]
+    },
+    {
+      "name": "Other AI work",
+      "sources": [
+        "FitMCP",
+        "RAG-LangChain-LlamaIndex-main",
+        "comfyui-react",
+        "Stations"
+      ],
+      "tag": "Reference, tooling and classical AI",
+      "what": "",
+      "rows": [
+        {
+          "method": "FitMCP — standalone MCP server",
+          "how": ".NET stdio MCP server with appraisal, cover letter and job-fetch tools on the same provider fallback.",
+          "does": "Job-fit tools callable from any MCP client."
+        },
+        {
+          "method": "RAG-LangChain-LlamaIndex — retrieval reference",
+          "how": "LangChain + LlamaIndex, FAISS/ChromaDB vector stores, local HuggingFace embeddings, selectable LLM.",
+          "does": "Question answering over any PDF."
+        },
+        {
+          "method": "comfyui-react — diffusion image client",
+          "how": "React client for ComfyUI's HTTP/WebSocket API: queue prompts, live progress, render images.",
+          "does": "Custom front end for local image generation."
+        },
+        {
+          "method": "Stations — classical game AI",
+          "how": "BSP procedural dungeon generation, A* pathfinding, turn-based enemy AI.",
+          "does": "Generated levels and enemies that hunt the player."
+        }
+      ]
+    }
+  ],
+  "matrix": {
+    "columns": [
+      {
+        "label": "AgentOne",
+        "project": "AgentOne"
+      },
+      {
+        "label": "jobfit",
+        "project": "jobfit (JobFit AI)"
+      },
+      {
+        "label": "ChattyPrayers",
+        "project": "ChattyPrayers.Api"
+      },
+      {
+        "label": "ComfyUI asst.",
+        "project": "ComfyUI Claude Assistant"
+      },
+      {
+        "label": "baby-meta-agent",
+        "project": "baby-meta-agent"
+      },
+      {
+        "label": "Globetrotter",
+        "project": "Globetrotter (tourguide / tourguide_flutter)"
+      },
+      {
+        "label": "Persona apps",
+        "project": "Persona apps: Moot, AiChat, Horus, CV_carkus"
+      },
+      {
+        "label": "RAG ref.",
+        "project": "Other AI work",
+        "note": "only the RAG-LangChain-LlamaIndex row of that section"
+      }
+    ],
+    "rows": [
+      {
+        "method": "Provider cascade / fallback",
+        "flags": [
+          true,
+          true,
+          true,
+          false,
+          false,
+          false,
+          false,
+          false
+        ]
+      },
+      {
+        "method": "Local LLM (Ollama / llama.cpp)",
+        "flags": [
+          true,
+          true,
+          true,
+          false,
+          true,
+          false,
+          false,
+          true
+        ]
+      },
+      {
+        "method": "Structured output + validation + retry",
+        "flags": [
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          false,
+          false
+        ]
+      },
+      {
+        "method": "Agentic tool-use loop",
+        "flags": [
+          true,
+          false,
+          false,
+          true,
+          true,
+          false,
+          false,
+          false
+        ]
+      },
+      {
+        "method": "Multi-agent / planning",
+        "flags": [
+          true,
+          false,
+          false,
+          true,
+          true,
+          false,
+          true,
+          false
+        ]
+      },
+      {
+        "method": "Embeddings / RAG",
+        "flags": [
+          true,
+          false,
+          true,
+          false,
+          false,
+          false,
+          false,
+          true
+        ]
+      },
+      {
+        "method": "MCP server",
+        "flags": [
+          true,
+          true,
+          true,
+          false,
+          false,
+          false,
+          false,
+          false
+        ]
+      },
+      {
+        "method": "MCP client",
+        "flags": [
+          true,
+          true,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ]
+      },
+      {
+        "method": "LLM-as-judge / evals",
+        "flags": [
+          true,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ]
+      },
+      {
+        "method": "Reinforcement learning (bandit)",
+        "flags": [
+          true,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ]
+      },
+      {
+        "method": "Guardrails / safety layer",
+        "flags": [
+          true,
+          true,
+          true,
+          false,
+          true,
+          true,
+          false,
+          false
+        ]
+      },
+      {
+        "method": "Parallel model ensemble",
+        "flags": [
+          false,
+          true,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ]
+      },
+      {
+        "method": "Streaming responses",
+        "flags": [
+          true,
+          false,
+          true,
+          false,
+          false,
+          false,
+          true,
+          false
+        ]
+      },
+      {
+        "method": "Grounded / constrained generation",
+        "flags": [
+          true,
+          true,
+          true,
+          true,
+          false,
+          true,
+          false,
+          true
+        ]
+      },
+      {
+        "method": "Generative images / diagrams",
+        "flags": [
+          true,
+          false,
+          true,
+          true,
+          false,
+          false,
+          false,
+          false
+        ]
+      },
+      {
+        "method": "Observability (tokens, latency)",
+        "flags": [
+          true,
+          true,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ]
+      },
+      {
+        "method": "Code sandboxing",
+        "flags": [
+          true,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ]
+      }
+    ]
+  }
+}

@@ -391,11 +391,13 @@ interface Props {
   // agentConfig, passed through onBackToSetup) — undefined/null the first
   // time Setup is shown, before anything has been bootstrapped yet.
   activeAgentConfig?: AgentConfig | null
+  // Set by Chat's "New agent": restore the form without its Focus topics.
+  clearFocus?: boolean
   // Opens AdvancedSetup.tsx (structured spec + review step) instead of this screen.
   onOpenAdvanced?: () => void
 }
 
-export default function Setup({ agentName, onAgentNameChange, bootstrapping, error, onStart, onDone, onError, onResumeChat, activeAgentConfig, onOpenAdvanced }: Props) {
+export default function Setup({ agentName, onAgentNameChange, bootstrapping, error, onStart, onDone, onError, onResumeChat, activeAgentConfig, clearFocus, onOpenAdvanced }: Props) {
   // Persisted across reloads/new-agent resets, same localStorage idiom as
   // provider/dateFormat above — otherwise the type picker silently reverted
   // to "general" every time, discarding the user's last choice.
@@ -1246,6 +1248,31 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     setKeywords(prev => prev.map(k => k.toLowerCase() === lower ? newKw : k))
   }
 
+  // Click-to-edit for a selected Focus chip. Only this agent's list changes;
+  // the Saved Focus pool keeps its own copy.
+  const [editingChip, setEditingChip] = useState<string | null>(null)
+  const [chipDraft, setChipDraft] = useState('')
+  const chipCancelRef = useRef(false)
+
+  function startChipEdit(kw: string) {
+    if (bootstrapping) return
+    chipCancelRef.current = false
+    setEditingChip(kw)
+    setChipDraft(kw)
+  }
+
+  function commitChipEdit() {
+    const old = editingChip
+    setEditingChip(null)
+    if (old === null || chipCancelRef.current) return
+    const next = chipDraft.trim().slice(0, MAX_FOCUS_CHARS)
+    // Empty, unchanged, or a duplicate of another chip: keep the original.
+    if (!next || next === old) return
+    const lowerOld = old.toLowerCase()
+    if (keywords.some(k => k.toLowerCase() === next.toLowerCase() && k.toLowerCase() !== lowerOld)) return
+    setKeywords(prev => prev.map(k => k.toLowerCase() === lowerOld ? next : k))
+  }
+
   function removeKeyword(kw: string) {
     if (bootstrapping) return
     setKeywords(prev => prev.filter(k => k.toLowerCase() !== kw.toLowerCase()))
@@ -1400,11 +1427,21 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     inputRef.current?.focus()
   }
 
-  // Opens the agent already built from this profile, as resuming a job does
-  // but with a fresh conversation: no brief, no bootstrap.
+  // Opens the agent already built from this profile, no brief, no bootstrap.
+  // Continues this agent's most recent saved job (matched by agent name);
+  // with none saved, opens it on an empty conversation. Recommission on the
+  // deployment screen starts it fresh.
   function launchDraft(d: AgentDraft) {
     if (bootstrapping || !d.builtConfig) return
     setPoolOpen(false)
+    const lastJob = loadSavedChats()
+      .filter(c => c.agentName === d.agentName)
+      .sort((a, b) => b.savedAt - a.savedAt)[0]
+    if (lastJob) {
+      setLastOpenedPointer({ kind: 'savedChat', id: lastJob.id })
+      onResumeChat(lastJob)
+      return
+    }
     onResumeChat({
       id: crypto.randomUUID(),
       agentName: d.agentName,
@@ -1510,6 +1547,13 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
   useEffect(() => {
     if (!activeAgentConfig) return
     applyAgentConfigToForm(activeAgentConfig, agentName)
+    // A new agent: no Focus (so no brief drafts itself), and Save makes a
+    // new profile rather than editing the job just left.
+    if (clearFocus) {
+      setKeywords([])
+      setRestoredOutputs(null)
+      return
+    }
     // The open job, if it's been saved: Save then edits it rather than
     // leaving its old Focus to be restored on the next reload. Matched on
     // the system prompt too, since the pointer can still name an earlier
@@ -2044,9 +2088,35 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
               )}
               {specialtiesOpen && (
                 <div className={`${styles.chipArea} ${keywords.length > 0 ? styles.chipAreaWithSave : ''}`} onClick={() => inputRef.current?.focus()}>
-                  {keywords.map(kw => (
+                  {keywords.map(kw => editingChip === kw ? (
+                    <span key={kw} className={styles.chip}>
+                      <input
+                        className={styles.chipEditInput}
+                        value={chipDraft}
+                        autoFocus
+                        size={Math.max(4, chipDraft.length)}
+                        maxLength={MAX_FOCUS_CHARS}
+                        onClick={ev => ev.stopPropagation()}
+                        onChange={e => setChipDraft(e.target.value)}
+                        onBlur={commitChipEdit}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') { e.preventDefault(); commitChipEdit() }
+                          if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); chipCancelRef.current = true; setEditingChip(null) }
+                        }}
+                        aria-label={`Edit ${kw}`}
+                      />
+                    </span>
+                  ) : (
                     <span key={kw} className={styles.chip} title={kw.length > MAX_FOCUS_CHARS ? kw : undefined}>
-                      {shortFocus(kw)}
+                      <button
+                        type="button"
+                        className={styles.chipLabel}
+                        onClick={ev => { ev.stopPropagation(); startChipEdit(kw) }}
+                        disabled={bootstrapping}
+                        title={`Edit ${kw}`}
+                      >
+                        {shortFocus(kw)}
+                      </button>
                       <button
                         type="button"
                         className={styles.chipX}
@@ -3019,6 +3089,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                 disabled={bootstrapping}
                 onLoadDraft={loadDraft}
                 onLaunchDraft={launchDraft}
+                onResumeChat={c => { setPoolOpen(false); resumeChat(c) }}
                 onDeleteDraft={deleteDraft}
                 onLoadChatDetails={loadChatDetails}
                 onHideChat={hideChat}

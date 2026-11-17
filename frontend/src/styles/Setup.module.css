@@ -116,6 +116,36 @@
   padding: 0.25rem 0.5rem 0.25rem 0.65rem;
 }
 
+/* A selected chip's text: click to edit it in place. Styled as plain chip
+   text; inherits the chip's font, never the browser's button default. */
+.chipLabel {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: text;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  padding: 0;
+}
+
+.chipLabel:disabled {
+  cursor: default;
+}
+
+.chipEditInput {
+  background: #ffffff;
+  border: none;
+  border-radius: 3px;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  outline: none;
+  padding: 0 0.2rem;
+  max-width: 260px;
+}
+
 .chipX {
   display: inline-flex;
   align-items: center;
