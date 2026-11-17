@@ -14,18 +14,41 @@ export function loadSavedChats(): SavedChat[] {
   }
 }
 
-function writeSavedChats(chats: SavedChat[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(chats))
+// False when the browser refuses the write (storage quota full). Never
+// throws: a save runs inside React effects, where a throw takes the whole
+// Chat screen down.
+function writeSavedChats(chats: SavedChat[]): boolean {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(chats))
+    return true
+  } catch (err) {
+    console.warn('Saving chats to browser storage failed', err)
+    return false
+  }
+}
+
+// Embedded images (generate_image's base64 `data:` URIs) are what fill the
+// browser's ~5 MB storage. This copy of a chat leaves out any large one.
+const BIG_DATA_URI = 2000
+function withoutEmbeddedImages<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value), (_k, v) =>
+    typeof v === 'string' && v.startsWith('data:') && v.length > BIG_DATA_URI ? '' : v)
 }
 
 // Upserts by id, most-recently-saved first, so re-saving the same
 // conversation (e.g. after sending a few more messages) updates its existing
-// entry instead of piling up duplicates.
+// entry instead of piling up duplicates. When storage is full it retries
+// without the chat's embedded images; if that still doesn't fit, the chat
+// isn't saved and the other saved chats are left untouched (none are
+// deleted to make room).
 export function saveChat(chat: SavedChat): SavedChat[] {
-  const rest = loadSavedChats().filter(c => c.id !== chat.id)
-  const updated = [chat, ...rest]
-  writeSavedChats(updated)
-  return updated
+  const stored = loadSavedChats()
+  const rest = stored.filter(c => c.id !== chat.id)
+  for (const candidate of [chat, withoutEmbeddedImages(chat)]) {
+    const updated = [candidate, ...rest]
+    if (writeSavedChats(updated)) return updated
+  }
+  return stored
 }
 
 export function deleteSavedChat(id: string): SavedChat[] {

@@ -11,3 +11,7 @@ mcp-server-fetch>=0.6.0
 # tools, see backend/mcp_server.py / backend/src/agent_registry.py. Runs as
 # its own ASGI process (the mcp SDK's HTTP transports are Starlette/ASGI-only).
 uvicorn>=0.30.0
+# Documents attached on Setup's Focus step (backend/src/documents.py):
+# text out of PDFs and Word files.
+pypdf>=5.0.0
+python-docx>=1.1.0

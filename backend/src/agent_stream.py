@@ -13,6 +13,7 @@ import scope_guard
 import eval_checks
 import eval_log
 import mcp_client
+import documents
 import run_trace
 
 logger = logging.getLogger(__name__)
@@ -529,6 +530,38 @@ def _extract_narrated_delegations(text: str) -> list[dict]:
 _MD_LINK_RE = re.compile(r"(!)?\[([^\]]*)\]\(((?:https?://|data:)[^\s)]+)\)")
 _URL_IN_TEXT_RE = re.compile(r"https?://[^\s\"'\\]+")
 _DATA_URI_IN_TEXT_RE = re.compile(r"data:image/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+")
+
+# A generated image comes back as a base64 data URI of 200k-350k tokens'
+# worth of text. Sent to the model as is, it overflowed Cloudflare's 32k
+# window (413) on the call after every generate_image, and no model can copy
+# it back into a reply anyway. The model sees a short handle instead
+# ("image://1"), which it embeds like any image_url; code swaps the real
+# data back into the reply (_restore_image_data) before the verified-link
+# check, which still sees the full tool results. The handles are per turn.
+_IMAGE_HANDLE_RE = re.compile(r"image://(\d+)")
+
+
+def _hide_image_data(text: str, images: list[str]) -> str:
+    def swap(match: re.Match) -> str:
+        uri = match.group(0)
+        if uri not in images:
+            images.append(uri)
+        return f"image://{images.index(uri) + 1}"
+    return _DATA_URI_IN_TEXT_RE.sub(swap, text) if "data:image/" in text else text
+
+
+def _restore_image_data(text: str, images: list[str]) -> str:
+    # A handle the model made up (no such image) becomes its alt text, as an
+    # unverified link does in _strip_unverified_links.
+    text = re.sub(
+        r"!\[([^\]]*)\]\(image://(\d+)\)",
+        lambda m: m.group(0) if 0 < int(m.group(2)) <= len(images) else m.group(1),
+        text,
+    )
+    def swap(match: re.Match) -> str:
+        n = int(match.group(1))
+        return images[n - 1] if 0 < n <= len(images) else match.group(0)
+    return _IMAGE_HANDLE_RE.sub(swap, text) if images else text
 
 
 def _approx_tokens(msg: dict) -> int:
@@ -1199,16 +1232,29 @@ def _delegation_rule_body(keywords: list[str], max_delegations: int, lead: str |
      the sources and expert views, and where to go deeper.
    - BY TOPIC when the topics are genuinely separate subjects: one worker
      per topic.
-   Every worker's `task` names its own angle or topic and what the user
-   asked for (e.g. "<angle>: <the user's request>"); its `context` starts
-   with "Split: by angle" or "Split: by topic" and says what the OTHER
-   workers are covering, so no two workers do the same search. Workers research; never
-   delegate summarising, compiling or writing the report, which is your
-   job once they report back. A topic may
-   be a creative task rather than research (e.g. "clown images" means
-   generate_image/search_image, not a web search); give it that kind of
-   task. A quick question unrelated to the job (a fact, a definition, a
-   greeting) is not a research turn: answer it yourself without a team."""
+   - SUBJECT + TASK when some topics are SUBJECTS (what the job is about:
+     a person, place, thing or field) and others are TASKS (something to
+     do or make: "create images", "timeline", "compare prices", "write a
+     speech"). A task is never a subject of its own and never researched
+     as one: apply it TO the subject topics. E.g. "Augustus" + "Create
+     Images" means workers researching Augustus AND a worker creating
+     images OF Augustus (generate_image/search_image), not a worker
+     researching image creation. Give each task its own worker, with the
+     subject named in its `task` and what the subject is in its `context`.
+     Subjects can still be split by angle or topic among the other workers.
+   Read every topic through your own character (the persona, personality
+   and way of working set out above): it decides the angle each worker
+   takes on a subject and the style and treatment of anything a task
+   makes. Pass that on in each worker's `context`.
+   Every worker's `task` names its own angle, topic or task and what the
+   user asked for (e.g. "<angle>: <the user's request>"); its `context`
+   starts with "Split: by angle", "Split: by topic" or "Split: subject +
+   task" and says what the OTHER workers are covering, so no two workers
+   do the same search. Workers research or make; never delegate
+   summarising, compiling or writing the report, which is your job once
+   they report back. A quick question unrelated to the job (a fact, a
+   definition, a greeting) is not a research turn: answer it yourself
+   without a team."""
     return f"""
    First, identify the distinct tasks the request actually requires. When
    it names multiple distinct keywords, topics, roles, or subjects to
@@ -1431,7 +1477,7 @@ def _run_agent_stream(messages: list, agent_config: dict, allow_delegation: bool
         "regardless of this note.\n"
     ) if _location else ""
 
-    system_prompt = agent_config["system_prompt"] + _location_note + agent_spec.runtime_scope_note(spec) + _job_continuity_note(messages) + f"""
+    system_prompt = agent_config["system_prompt"] + _location_note + documents.runtime_note(documents.normalize(agent_config.get("documents"))) + agent_spec.runtime_scope_note(spec) + _job_continuity_note(messages) + f"""
 
 ---
 CRITICAL TOOL RULES — READ BEFORE CALLING ANY TOOL:
@@ -1478,7 +1524,9 @@ clarifying question only belongs AFTER you've already produced real findings
    picture would genuinely help — a place, a species, a landmark, a
    product, something visual the user is asking about — call `search_image`
    with the topic. If it returns an `image_url`, embed it in your reply as
-   a plain markdown image: `![description](image_url)`. If it returns an
+   a plain markdown image: `![description](image_url)`. An `image_url` may
+   be a short handle like `image://1`: embed it exactly as given, the app
+   puts the image in its place. If it returns an
    error (no match / no image available), say so briefly in plain text and
    move on — do not retry it repeatedly, and do not apologize at length.
    NEVER write a `![...](...)` image whose url wasn't the literal
@@ -1741,10 +1789,16 @@ clarifying question only belongs AFTER you've already produced real findings
 
     # Build initial message list: system prompt first, then conversation history
     current_messages: list[dict] = [{"role": "system", "content": system_prompt}]
+    # Images in this turn's model-side messages, behind image://N handles
+    # (_hide_image_data): earlier replies' images first, then tool results'.
+    turn_images: list[str] = []
     for m in messages:
         image = m.get("image")
         if not image:
-            current_messages.append({"role": m["role"], "content": m["content"]})
+            content = m["content"]
+            if isinstance(content, str):
+                content = _hide_image_data(content, turn_images)
+            current_messages.append({"role": m["role"], "content": content})
             continue
         if not vision_capable:
             # Whatever provider this turn will actually run on can't see
@@ -2122,7 +2176,7 @@ clarifying question only belongs AFTER you've already produced real findings
                         "role": "user",
                         "content": (
                             f"You used {delegation_count} worker(s). This is a research turn on the job, "
-                            "so plan a team of at least 2 workers (split by angle or by topic, rule 8) "
+                            "so plan a team of at least 2 workers (split by angle, by topic, or subject + task, rule 8) "
                             "and call delegate_to_worker for each one now, all in this reply. "
                             "Do not write the report until they have reported back."
                         ),
@@ -2379,7 +2433,11 @@ clarifying question only belongs AFTER you've already produced real findings
 
                 yield {
                     "type": "done",
-                    "response": final_text,
+                    # Images go back in last, so the scope guard, route and
+                    # self-check calls above see the short handles, not the
+                    # image data. A handle only ever points at an image a tool
+                    # returned or the history holds, so it needs no link check.
+                    "response": _restore_image_data(final_text, turn_images),
                     "tool_calls": tool_calls_log,
                     # Advisory: Chat.tsx shows these as chips, and only a
                     # click spends anything (POST /relic, relic.py).
@@ -2445,7 +2503,7 @@ clarifying question only belongs AFTER you've already produced real findings
                 tool_result_messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
-                    "content": result_str,
+                    "content": _hide_image_data(result_str, turn_images),
                 })
                 return result_str
 

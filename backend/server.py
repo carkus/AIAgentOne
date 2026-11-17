@@ -51,6 +51,7 @@ import agent_spec
 import agent_stats
 import agent_drafts
 import mcp_client
+import documents
 from mcp_registry import MCP_SERVERS
 
 app = Flask(__name__)
@@ -81,6 +82,8 @@ def bootstrap():
     # Structured spec from the Advanced Setup screen — None for the basic
     # Setup flow, which keeps its existing purpose-string-only behaviour.
     spec = agent_spec.normalize((body or {}).get("spec"))
+    # Text of documents attached on the Focus step (POST /brief-document).
+    docs = documents.normalize((body or {}).get("documents"))
     # Only rate-limit requests that actually spend Gemini quota — a local-only
     # request costs nothing, so don't burn a caller's rate-limit budget on it.
     if provider != "ollama":
@@ -89,7 +92,7 @@ def bootstrap():
             return jsonify({"error": rate_limit_error}), 429
     def generate():
         try:
-            for event in generate_agent_config_stream(purpose, provider, model, agent_type=agent_type, image=image, spec=spec):
+            for event in generate_agent_config_stream(purpose, provider, model, agent_type=agent_type, image=image, spec=spec, documents=docs):
                 yield json.dumps(event) + "\n"
         except Exception as e:
             yield json.dumps({"type": "error", "message": str(e)}) + "\n"
@@ -202,8 +205,10 @@ def brief():
         return "", 204
     body = request.get_json() or {}
     keywords = body.get("keywords") or []
-    if not isinstance(keywords, list) or not keywords:
-        return jsonify({"error": "keywords is required"}), 400
+    # The Focus is keywords, or documents / an image's description instead.
+    docs = documents.normalize(body.get("documents"))
+    if not isinstance(keywords, list) or (not keywords and not docs):
+        return jsonify({"error": "keywords or documents are required"}), 400
     provider = ((body.get("provider") or "").strip() or None)
     model = ((body.get("ollama_model") or "").strip() or None)
     if provider != "ollama":
@@ -223,6 +228,7 @@ def brief():
         behaviors=body.get("behaviors") or None,
         traits=body.get("traits") or None,
         lead=(str(body.get("lead") or "").strip() or None),
+        documents=docs,
     )
     if result is None:
         return jsonify({"error": "Could not generate a brief"}), 502
@@ -237,8 +243,10 @@ def brief_stream():
         return "", 204
     body = request.get_json() or {}
     keywords = body.get("keywords") or []
-    if not isinstance(keywords, list) or not keywords:
-        return jsonify({"error": "keywords is required"}), 400
+    # The Focus is keywords, or documents / an image's description instead.
+    docs = documents.normalize(body.get("documents"))
+    if not isinstance(keywords, list) or (not keywords and not docs):
+        return jsonify({"error": "keywords or documents are required"}), 400
     provider = ((body.get("provider") or "").strip() or None)
     model = ((body.get("ollama_model") or "").strip() or None)
     if provider != "ollama":
@@ -258,6 +266,7 @@ def brief_stream():
         behaviors=body.get("behaviors") or None,
         traits=body.get("traits") or None,
         lead=(str(body.get("lead") or "").strip() or None),
+        documents=docs,
     )
 
     def generate():
@@ -298,6 +307,7 @@ def brief_map():
         agent_type=body.get("agentType"),
         provider=provider,
         model=model,
+        documents=documents.normalize(body.get("documents")),
     )
     if result is None:
         return jsonify({"error": "Could not draw the brief graph"}), 502
@@ -312,8 +322,9 @@ def brief_outputs():
         return "", 204
     body = request.get_json() or {}
     keywords = [str(k) for k in body.get("keywords") or [] if str(k).strip()] if isinstance(body.get("keywords"), list) else []
-    if not keywords:
-        return jsonify({"error": "keywords are required"}), 400
+    docs = documents.normalize(body.get("documents"))
+    if not keywords and not docs:
+        return jsonify({"error": "keywords or documents are required"}), 400
     provider = ((body.get("provider") or "").strip() or None)
     model = ((body.get("ollama_model") or "").strip() or None)
     if provider != "ollama":
@@ -329,10 +340,50 @@ def brief_outputs():
         behaviors=as_list(body.get("behaviors")),
         provider=provider,
         model=model,
+        documents=docs,
     )
     if outputs is None:
         return jsonify({"error": "Could not propose outputs"}), 502
     return jsonify({"outputs": outputs})
+
+
+@app.route("/brief-document", methods=["POST", "OPTIONS"])
+def brief_document():
+    """A document attached on Setup's Focus step: returns its plain text
+    (documents.py), which then travels with the agent as
+    AgentConfig.documents. Under the /brief prefix so the proxies cover it.
+    No model call, so not rate-limited."""
+    if request.method == "OPTIONS":
+        return "", 204
+    file = request.files.get("file")
+    if file is None:
+        return jsonify({"error": "file is required"}), 400
+    try:
+        return jsonify(documents.extract(file.filename or "", file.read(documents.MAX_UPLOAD_BYTES + 1)))
+    except documents.DocumentError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/brief-image", methods=["POST", "OPTIONS"])
+def brief_image():
+    """An image given as the Focus: a vision model describes it once
+    (documents.describe_image), and the description then stands in for it
+    like a document's text. Under the /brief prefix so the proxies cover it.
+    200 with description null when no vision model is available, so the
+    browser shows a message rather than logging a failed request."""
+    if request.method == "OPTIONS":
+        return "", 204
+    body = request.get_json(silent=True) or {}
+    image = body.get("image")
+    if not isinstance(image, str) or not image.startswith("data:image/"):
+        return jsonify({"error": "image (a data URL) is required"}), 400
+    if len(image) > documents.MAX_IMAGE_BYTES * 4 // 3 + 100:
+        return jsonify({"error": "The image is over 8 MB."}), 400
+    provider = ((body.get("provider") or "").strip() or None)
+    rate_limit_error = rate_limit.check(rate_limit.client_ip(request), bucket="brief")
+    if rate_limit_error:
+        return jsonify({"error": rate_limit_error}), 429
+    return jsonify({"description": documents.describe_image(image, provider)})
 
 
 @app.route("/brief-focus", methods=["POST", "OPTIONS"])
@@ -345,8 +396,11 @@ def brief_focus():
     body = request.get_json() or {}
     provider = ((body.get("provider") or "").strip() or None)
     result = check_focus(body.get("keywords"), body.get("pool"), provider)
+    # No embeddings (e.g. Gemini out of credits): a normal reply with nothing
+    # to show, not an error status, so the browser doesn't log a failed
+    # request on every Focus change. fetchFocusInsights reads it as null.
     if result is None:
-        return jsonify({"error": "Embeddings unavailable"}), 502
+        return jsonify({"available": False})
     return jsonify(result)
 
 

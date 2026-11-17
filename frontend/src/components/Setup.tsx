@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { bootstrap, buildBriefRelic, createAgentDraft, createSavedSearch, deleteAgentDraft, deleteSavedSearch, fetchBriefOutputs, streamAgentBrief, fetchFocusInsights, fetchModelInfo, listAgentDrafts, listPublishedAgents, listSavedSearches, unpublishAgent, updateAgentDraft } from '../api'
+import { bootstrap, buildBriefRelic, createAgentDraft, createSavedSearch, deleteAgentDraft, deleteSavedSearch, describeImage, extractDocument, fetchBriefOutputs, streamAgentBrief, fetchFocusInsights, fetchModelInfo, listAgentDrafts, listPublishedAgents, listSavedSearches, unpublishAgent, updateAgentDraft } from '../api'
 import type { AgentBrief, AgentDraft, BriefChoice, BriefMap, BriefPartId, BriefStageId, BriefStreamEvent, FocusInsights, PublishedAgent, SavedSearch } from '../api'
 import { getLastOpenedPointer, hideSavedChat, loadHiddenChatIds, loadSavedChats, saveChat, setLastOpenedPointer } from '../chatStorage'
-import type { AgentConfig, AgentTemplateId, ArmStat, BootstrapStreamEvent, Deliverable, LlmProvider, Relic, RelicKind, RelicSuggestion, SavedChat, SavedChatMessage, SearchDefaults } from '../types'
+import type { AgentConfig, AgentDocument, AgentTemplateId, ExtractedDocument, ArmStat, BootstrapStreamEvent, Deliverable, LlmProvider, Relic, RelicKind, RelicSuggestion, SavedChat, SavedChatMessage, SearchDefaults } from '../types'
 import { AGENT_TEMPLATES, getTemplate, PERSONALITY_TRAITS, describeTraitEffect, BEHAVIOR_TOGGLES, DEFAULT_AGENT_SPEC, MAX_FOCUS_CHARS, shortFocus, type BehaviorToggle } from '../agentTypes'
 import { storedOllamaModel, storedCloudflareModel, describeModel, describeModelFallback, formatModelInfo, type ModelInfo } from '../modelLabel'
 import { buildAgentBrief, joinNatural } from '../agentBrief'
@@ -43,6 +43,8 @@ interface BuildInputs {
   traits: string[]
   outputs: string[]
   lead: string | null
+  // Names of the image or documents when they are the Focus.
+  material: string[]
 }
 
 function buildKey(b: BuildInputs): string {
@@ -50,6 +52,7 @@ function buildKey(b: BuildInputs): string {
   return JSON.stringify([
     b.template, sorted(b.keywords), b.location.trim(), b.factorLocation,
     sorted(b.toggles), sorted(b.traits), sorted(b.outputs), (b.lead ?? '').toLowerCase(),
+    sorted(b.material),
   ])
 }
 
@@ -63,8 +66,18 @@ function configBuildKey(cfg: AgentConfig): string {
     traits: cfg.active_traits ?? [],
     outputs: (cfg.deliverables ?? []).map(d => d.kind),
     lead: cfg.lead_topic ?? null,
+    material: (cfg.documents ?? []).map(d => d.name),
   })
 }
+
+// What the Focus is: keywords, an image or documents. Only the chosen tab's
+// content is the Focus; the three are never combined.
+type FocusMode = 'keywords' | 'image' | 'document'
+const FOCUS_MODES: { id: FocusMode; label: string }[] = [
+  { id: 'keywords', label: 'Keywords' },
+  { id: 'image', label: 'Image' },
+  { id: 'document', label: 'Document' },
+]
 
 function AgentTypeIcon({ id }: { id: AgentTemplateId }) {
   const common = {
@@ -342,6 +355,7 @@ const DEFAULT_MAX_DELEGATIONS = 3
 // specialty at all) — keeps the specialty set small enough that the Brief
 // and bootstrap prompt stay focused rather than diluted across many topics.
 const MAX_SPECIALTIES = 4
+const MAX_FOCUS_DOCS = 3
 
 // Deterministic warning check, used only when the AI-drafted brief (which
 // does its own, richer warning assessment — see backend/src/brief.py)
@@ -429,9 +443,10 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     localStorage.setItem('aiagent_agent_type', agentType)
   }, [agentType])
   const [keywords, setKeywords] = useState<string[]>([])
+  const [focusMode, setFocusMode] = useState<FocusMode>('keywords')
   // The Focus topic made the lead from a brief choice; null = no lead.
   const [leadTopic, setLeadTopic] = useState<string | null>(null)
-  const lead = leadTopic && keywords.length > 1
+  const lead = focusMode === 'keywords' && leadTopic && keywords.length > 1
     ? keywords.find(k => k.toLowerCase() === leadTopic.toLowerCase()) ?? null
     : null
   const [draft, setDraft] = useState('')
@@ -524,36 +539,94 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
   // specialties (and therefore no brief) yet — cleared as soon as the user
   // adds one, so it never lingers stale.
   const [commissionHint, setCommissionHint] = useState<string | null>(null)
-  useEffect(() => {
-    if (keywords.length > 0) setCommissionHint(null)
-  }, [keywords.length])
-  // Optional image attached alongside Focus — sent as a real image part on
-  // the bootstrap call (server.py/bootstrap.py), the same base64 data URL
-  // shape and FileReader flow as Chat.tsx's composer attachment, so the
-  // model can let what it depicts inform the agent the same way a keyword
-  // does, not just acknowledge it.
+  // The Image tab: the picture is the Focus. A vision model describes it
+  // once (POST /brief-image), and that description travels like a
+  // document's text; the image itself also goes to the bootstrap call.
   const [purposeImage, setPurposeImage] = useState<string | null>(null)
   const [attachingPurposeImage, setAttachingPurposeImage] = useState(false)
   const purposeImageInputRef = useRef<HTMLInputElement>(null)
-  function handlePurposeImageAttachClick() {
-    purposeImageInputRef.current?.click()
+  const [imageName, setImageName] = useState('')
+  const [imageDescription, setImageDescription] = useState<string | null>(null)
+  const [describingImage, setDescribingImage] = useState(false)
+  const imageRequestRef = useRef(0)
+  // The Document tab: the backend pulls out each file's text (POST
+  // /brief-document) and it travels with the agent as AgentConfig.documents,
+  // for it to analyse every turn (agent_stream.py).
+  const focusDocsInputRef = useRef<HTMLInputElement>(null)
+  const [focusDocs, setFocusDocs] = useState<ExtractedDocument[]>([])
+  const [readingDocs, setReadingDocs] = useState(0)
+  const [attachError, setAttachError] = useState<string | null>(null)
+  function handleFocusDocsChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const docs = Array.from(e.target.files ?? [])
+    e.target.value = ''
+    setAttachError(null)
+    const room = MAX_FOCUS_DOCS - focusDocs.length - readingDocs
+    if (docs.length > room) setAttachError(`Up to ${MAX_FOCUS_DOCS} documents.`)
+    for (const file of docs.slice(0, Math.max(0, room))) {
+      setReadingDocs(n => n + 1)
+      extractDocument(file)
+        .then(doc => setFocusDocs(ds => [...ds.filter(d => d.name !== doc.name), doc]))
+        .catch(err => setAttachError(`${file.name}: ${err instanceof Error ? err.message : 'could not be read'}`))
+        .finally(() => setReadingDocs(n => n - 1))
+    }
   }
-  function handlePurposeImageFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+  function removeFocusDoc(name: string) {
+    setFocusDocs(ds => ds.filter(d => d.name !== name))
+  }
+  function handleFocusImageChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
+    setAttachError(null)
+    readPurposeImage(file)
+  }
+  function readPurposeImage(file: File) {
+    const id = ++imageRequestRef.current
     setAttachingPurposeImage(true)
+    setImageName(file.name)
+    setImageDescription(null)
     const reader = new FileReader()
     reader.onload = () => {
-      setPurposeImage(typeof reader.result === 'string' ? reader.result : null)
+      if (id !== imageRequestRef.current) return
+      const url = typeof reader.result === 'string' ? reader.result : null
+      setPurposeImage(url)
       setAttachingPurposeImage(false)
+      if (!url) return
+      setDescribingImage(true)
+      describeImage(url, provider)
+        .then(text => {
+          if (id !== imageRequestRef.current) return
+          if (text) setImageDescription(text)
+          else setAttachError('No vision model is available to read images right now.')
+        })
+        .catch(err => {
+          if (id === imageRequestRef.current) setAttachError(err instanceof Error ? err.message : 'Could not read the image')
+        })
+        .finally(() => { if (id === imageRequestRef.current) setDescribingImage(false) })
     }
-    reader.onerror = () => setAttachingPurposeImage(false)
+    reader.onerror = () => { if (id === imageRequestRef.current) setAttachingPurposeImage(false) }
     reader.readAsDataURL(file)
   }
   function clearPurposeImage() {
+    imageRequestRef.current++
     setPurposeImage(null)
+    setImageName('')
+    setImageDescription(null)
+    setDescribingImage(false)
+    setAttachingPurposeImage(false)
   }
+  // The Focus as the job sees it: only the chosen tab's content.
+  const jobKeywords = focusMode === 'keywords' ? keywords : []
+  const focusMaterial: AgentDocument[] = focusMode === 'document'
+    ? focusDocs.map(({ name, text }) => ({ name, text }))
+    : focusMode === 'image' && imageDescription
+      ? [{ name: `Image: ${imageName || 'image'}`, text: imageDescription }]
+      : []
+  const focusImage = focusMode === 'image' ? purposeImage : null
+  const focusReady = jobKeywords.length > 0 || focusMaterial.length > 0
+  useEffect(() => {
+    if (focusReady) setCommissionHint(null)
+  }, [focusReady])
   // Saved searches live server-side now (see backend/src/saved_searches.py) —
   // fetch once on mount rather than reading localStorage synchronously.
   useEffect(() => {
@@ -842,7 +915,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     try {
       const content = await buildBriefRelic(suggestion, aiBrief.text, {
         agentType,
-        keywords: [...keywords],
+        keywords: [...jobKeywords],
         location: usedLocation,
         traits: (PERSONALITY_TRAITS[agentType] ?? PERSONALITY_TRAITS.research).filter(t => selectedTraits.includes(t.id)).map(t => t.label),
         behaviors: BEHAVIOR_TOGGLES.filter(t => activeToggles.includes(t.id)).map(t => t.label),
@@ -885,8 +958,8 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
         setBriefProgress(p => p && { ...p, parts: {}, fallback: true })
       }
     }
-    return streamAgentBrief(agentType, [...keywords], usedLocation, agentName, provider, activeModel,
-      priorQuestion, priorAnswer, maxDelegations, behaviorLabels, traitLabels, lead, onEvent)
+    return streamAgentBrief(agentType, [...jobKeywords], usedLocation, agentName, provider, activeModel,
+      priorQuestion, priorAnswer, maxDelegations, behaviorLabels, traitLabels, lead, onEvent, undefined, focusMaterial)
       .then(({ brief, map }) => {
         if (requestId !== briefRequestIdRef.current) return null
         setAiBrief(brief)
@@ -901,12 +974,13 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
   }
 
   const briefInputsKey = JSON.stringify([
-    agentType, keywords, usedLocation, agentName, maxDelegations,
+    agentType, jobKeywords, usedLocation, agentName, maxDelegations,
     [...activeToggles].sort(), [...selectedTraits].sort(), lead,
+    focusMaterial.map(d => [d.name, d.text.length]),
   ])
 
   useEffect(() => {
-    if (keywords.length === 0) {
+    if (!focusReady) {
       lastBriefInputsRef.current = ''
       setBriefScheduled(false)
       setAiBrief(null)
@@ -962,7 +1036,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
   // settled; a changed brief (or focus/character) proposes again and resets
   // the ticks to the agent's new picks.
   useEffect(() => {
-    if (setupStep !== 'outputs' || keywords.length === 0 || briefLoading || briefScheduled) return
+    if (setupStep !== 'outputs' || !focusReady || briefLoading || briefScheduled) return
     const key = briefInputsKey + '|' + (aiBrief?.text ?? '')
     if (key === outputsKeyRef.current) return
     outputsKeyRef.current = key
@@ -972,7 +1046,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
       .filter(t => selectedTraits.includes(t.id)).map(t => t.label)
     setOutputsLoading(true)
     setOutputsFailed(false)
-    fetchBriefOutputs([...keywords], aiBrief?.type === 'brief' ? aiBrief.text : '', agentType, traitLabels, behaviorLabels, provider, activeModel)
+    fetchBriefOutputs([...jobKeywords], aiBrief?.type === 'brief' ? aiBrief.text : '', agentType, traitLabels, behaviorLabels, provider, activeModel, undefined, focusMaterial)
       .then(outputs => {
         if (requestId !== outputsRequestIdRef.current) return
         if (restoredOutputs) {
@@ -1008,13 +1082,14 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     .filter(t => selectedTraits.includes(t.id)).map(t => t.id)
   const currentBuildKey = buildKey({
     template: agentType,
-    keywords,
+    keywords: jobKeywords,
     location: usedLocation,
     factorLocation,
     toggles: activeToggles,
     traits: currentTraitIds,
     outputs: chosenDeliverables.map(d => d.kind),
     lead,
+    material: focusMaterial.map(d => d.name),
   })
   const loadedBuild: AgentConfig | undefined = editing?.kind === 'draft'
     ? drafts.find(d => d.id === editing.id)?.builtConfig
@@ -1030,7 +1105,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
   // Debounced like the brief; embeddings are memoised server-side, so a
   // re-check after one add or remove only embeds the new topic.
   useEffect(() => {
-    if (setupStep !== 'focus' || keywords.length === 0) {
+    if (setupStep !== 'focus' || focusMode !== 'keywords' || keywords.length === 0) {
       setFocusInsights(null)
       return
     }
@@ -1041,7 +1116,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     }, 500)
     return () => { window.clearTimeout(timer); controller.abort() }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setupStep, keywords.join('\n'), focusPoolKey, provider])
+  }, [setupStep, focusMode, keywords.join('\n'), focusPoolKey, provider])
 
   // Only insights that still match the current topics (a stale reply can
   // land just after a remove).
@@ -1052,12 +1127,15 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
 
   // The process graph: the Setup steps as the agent has taken them so far,
   // then the deploy (bootstrap) stages.
+  const focusItems = jobKeywords.length > 0
+    ? jobKeywords.map(k => shortFocus(k).toUpperCase())
+    : focusMaterial.map(d => d.name)
   const commissionColumns: ColumnNode<ProcessNodeData>[][] = (() => {
     const traitLabels = (PERSONALITY_TRAITS[agentType] ?? PERSONALITY_TRAITS.research)
       .filter(t => selectedTraits.includes(t.id)).map(t => t.label)
     const behaviorLabels = BEHAVIOR_TOGGLES.filter(t => activeToggles.includes(t.id)).map(t => t.label)
     const character = [...traitLabels, ...behaviorLabels]
-    const briefNode: ProcessNodeData = keywords.length === 0
+    const briefNode: ProcessNodeData = !focusReady
       ? { icon: '📝', title: 'Brief', state: 'pending', detail: 'Drafted once there is Focus' }
       : briefLoading
         ? { icon: '📝', title: 'Brief', state: 'active', detail: briefProgress
@@ -1086,10 +1164,13 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
         // With Factor in location on, the location the agent will use.
         items: [getTemplate(agentType).label, ...(usedLocation ? [`Using location: ${usedLocation}`] : []), ...character],
         detail: character.length > 0 ? undefined : 'No traits or behaviour chosen' } }],
-      [{ id: 'focus', data: keywords.length > 0
-        ? { icon: '🎯', title: 'Focus', state: 'done', items: keywords.map(k => shortFocus(k).toUpperCase()),
+      [{ id: 'focus', data: focusReady
+        ? { icon: '🎯', title: 'Focus', state: 'done', items: focusItems,
             detail: focusOverlaps.length > 0 ? `${focusOverlaps.length} overlapping pair${focusOverlaps.length === 1 ? '' : 's'}` : undefined }
-        : { icon: '🎯', title: 'Focus', state: setupStep === 'focus' ? 'active' : 'pending', detail: 'Add at least one topic' } }],
+        : { icon: '🎯', title: 'Focus', state: setupStep === 'focus' ? 'active' : 'pending',
+            detail: focusMode === 'keywords' ? 'Add at least one topic'
+              : focusMode === 'image' ? (describingImage ? 'Reading the image…' : 'Choose an image')
+              : readingDocs > 0 ? 'Reading the document…' : 'Choose a document' } }],
       [{ id: 'brief', data: briefNode }],
       [{ id: 'outputs', data: outputsNode }],
     ]
@@ -1102,7 +1183,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
   // While deploying, the graph draws only the deploy stages, after one node
   // standing for the finished commission.
   const deployOnlyColumns: ColumnNode<ProcessNodeData>[][] = [
-    [{ id: 'commission', data: { icon: '📨', title: 'Commission', state: 'done', items: keywords.map(k => shortFocus(k).toUpperCase()) } }],
+    [{ id: 'commission', data: { icon: '📨', title: 'Commission', state: 'done', items: focusItems } }],
     ...deployColumns(deployRun ?? EMPTY_DEPLOY_RUN),
   ]
 
@@ -1681,14 +1762,15 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
   // needing a form submit event.
   async function runBootstrap() {
     if (bootstrapping) return
-    if (keywords.length === 0) {
-      setCommissionHint('Add at least one focus area above — the brief needs it before this agent can be commissioned.')
+    if (!focusReady) {
+      setCommissionHint('Add Focus above (keywords, an image or a document) — the brief needs it before this agent can be commissioned.')
       return
     }
     if (reusableConfig) {
       onStart()
       onDone({
         ...reusableConfig,
+        documents: focusMaterial.length > 0 ? focusMaterial : reusableConfig.documents,
         provider,
         ollama_model: provider === 'ollama' || provider === 'cloudflare' ? activeModel : null,
         max_delegations: maxDelegations,
@@ -1700,7 +1782,13 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     const activeInstructions = BEHAVIOR_TOGGLES.filter(t => activeToggles.includes(t.id)).map(t => t.instruction)
     const traitPool = PERSONALITY_TRAITS[agentType] ?? PERSONALITY_TRAITS.research
     const traitInstructions = traitPool.filter(t => selectedTraits.includes(t.id)).map(t => t.instruction)
-    const purpose = getTemplate(agentType).buildPurpose(keywords, loc) +
+    // With an image or documents as the Focus, the job is that material.
+    const purpose = (jobKeywords.length > 0
+      ? getTemplate(agentType).buildPurpose(jobKeywords, loc)
+      : `${getTemplate(agentType).label} agent whose Focus is the attached material: ${focusMaterial.map(d => d.name).join(', ')}. ` +
+        `Read it closely and work from it: analyse it, answer questions about it and draw out what matters, ` +
+        `quoting and citing it by name, and research outward from it where that adds something.` +
+        (loc ? ` The user's location is ${loc}; use it only where the material makes location relevant.` : '')) +
       (lead ? ` Treat "${lead}" as the lead focus: frame the work around it, with the other focus topics supporting or qualifying it.` : '') +
       (activeInstructions.length > 0 ? ` ${activeInstructions.join(' ')}` : '') +
       (traitInstructions.length > 0 ? ` ${traitInstructions.join(' ')}` : '') +
@@ -1727,14 +1815,15 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
         handleProgress,
         agentType,
         controller.signal,
-        purposeImage,
+        focusImage,
         // The persona takes the name shown in the header, so "How this agent
         // was made" doesn't introduce the agent under a second, invented name.
         { ...DEFAULT_AGENT_SPEC, persona_name: agentName.trim().slice(0, 40) },
+        focusMaterial,
       )
       const built: AgentConfig = {
         ...config,
-        keywords,
+        keywords: jobKeywords,
         location: location.trim(),
         factor_location: factorLocation,
         lead_topic: lead,
@@ -1743,6 +1832,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
         template: agentType,
         max_delegations: maxDelegations,
         deliverables: chosenDeliverables.length > 0 ? chosenDeliverables : undefined,
+        documents: focusMaterial.length > 0 ? focusMaterial : undefined,
         search_defaults: searchDefaults,
         active_toggles: activeToggles,
         // Only the ids that actually belong to this type's pool — selectedTraits
@@ -1786,7 +1876,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
 
   // The brief's one-click choices, minus any the current Focus already
   // makes moot (an add over the topic limit, a lead that's already the lead).
-  const briefChoices: BriefChoice[] = keywords.length === 0 || aiBrief?.type !== 'brief'
+  const briefChoices: BriefChoice[] = jobKeywords.length === 0 || aiBrief?.type !== 'brief'
     ? []
     : (aiBrief.choices ?? []).filter(c => {
         const has = keywords.some(k => k.toLowerCase() === c.topic.toLowerCase())
@@ -1795,12 +1885,12 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
         return has && keywords.length > 1
       })
 
-  const briefWarning = keywords.length === 0
+  const briefWarning = !focusReady
     ? null
     // The model's own note wins; with none (or a disclaimer the backend
     // dropped) the code-checked facts — topic count over the worker limit,
     // missing job-search location — still show.
-    : aiBrief?.warning ?? buildDeterministicWarning(keywords, agentType, factorLocation ? usedLocation : null, maxDelegations)
+    : aiBrief?.warning ?? buildDeterministicWarning(jobKeywords, agentType, factorLocation ? usedLocation : null, maxDelegations)
 
   // The brief in prose. Under the brief graph it sits in its own collapsible
   // "Written brief for Agent" section; without a graph it shows as before.
@@ -2178,17 +2268,34 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                 label="Focus"
                 expanded={specialtiesOpen}
                 onToggle={() => setSpecialtiesOpen(o => !o)}
-                help="Focus: the topics, roles, or keywords this agent will actually work on. Add at least one — they drive the Brief below and what the agent searches or reports on once commissioned."
-                count={keywords.length}
+                help="Focus: what this agent works on. Pick one kind: keywords (topics, roles or skills it searches and reports on), an image, or documents it analyses. Only the chosen tab is used; they drive the Brief and the job once commissioned."
+                count={focusMode === 'keywords' ? keywords.length : focusMaterial.length}
               />
               {specialtiesOpen && (
+                <div className={styles.focusTabs} role="radiogroup" aria-label="What the Focus is">
+                  {FOCUS_MODES.map(m => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={focusMode === m.id}
+                      className={focusMode === m.id ? styles.focusTabActive : styles.focusTab}
+                      onClick={() => { setFocusMode(m.id); setAttachError(null) }}
+                      disabled={bootstrapping}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {specialtiesOpen && focusMode === 'keywords' && (
                 <p className={styles.specialtiesHint}>
                   {keywords.length >= MAX_SPECIALTIES
                     ? `Limit of ${MAX_SPECIALTIES} reached — remove one to add another.`
                     : 'Focus keywords define the Agent job - they act like a search.\nType a keyword and press Enter, or pick from your Saved Focus below'}
                 </p>
               )}
-              {specialtiesOpen && (
+              {specialtiesOpen && focusMode === 'keywords' && (
                 <div className={`${styles.chipArea} ${keywords.length > 0 ? styles.chipAreaWithSave : ''}`} onClick={() => inputRef.current?.focus()}>
                   {keywords.map(kw => editingChip === kw ? (
                     <span key={kw} className={styles.chip}>
@@ -2253,46 +2360,49 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                       <span className={styles.focusSaveIcon} aria-hidden="true"><SaveIcon /></span>
                     </button>
                   )}
-                  <button
-                    type="button"
-                    className={styles.focusAttachBtn}
-                    onClick={ev => { ev.stopPropagation(); handlePurposeImageAttachClick() }}
-                    disabled={bootstrapping || attachingPurposeImage}
-                    title="Attach an image for the agent to look at — it'll inform the agent's design the same way a keyword would"
-                    aria-label="Attach an image"
-                  >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" width="16" height="16" aria-hidden="true">
-                      <path d="M16.5 6.5 8.7 14.3a3 3 0 1 0 4.24 4.24l7.1-7.1a5 5 0 1 0-7.07-7.07L5.5 11.84" />
-                    </svg>
-                  </button>
                 </div>
               )}
-              {/* Always mounted: the paperclip in the Focus field opens it. */}
-              <input
-                ref={purposeImageInputRef}
-                type="file"
-                accept="image/*"
-                className={styles.hiddenFileInput}
-                onChange={handlePurposeImageFileChange}
-              />
-              {/* The rows below only render with content, so an empty one
-                  doesn't leave a gap above the info line. */}
-              {specialtiesOpen && (purposeImage || attachingPurposeImage) && (
+              {specialtiesOpen && focusMode === 'image' && (<>
+                <p className={styles.specialtiesHint}>
+                  The image is the Focus: a vision model reads it once, and the agent works from that reading.
+                </p>
+                <input
+                  ref={purposeImageInputRef}
+                  type="file"
+                  accept="image/*"
+                  className={styles.hiddenFileInput}
+                  onChange={handleFocusImageChange}
+                />
                 <div className={styles.purposeImageRow}>
                   <div className={styles.purposeImageLeft}>
+                    <button
+                      type="button"
+                      className={styles.focusAttachTextBtn}
+                      onClick={() => purposeImageInputRef.current?.click()}
+                      disabled={bootstrapping || attachingPurposeImage || describingImage}
+                      title="Choose an image for the agent to work from"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" width="16" height="16" aria-hidden="true">
+                        <path d="M16.5 6.5 8.7 14.3a3 3 0 1 0 4.24 4.24l7.1-7.1a5 5 0 1 0-7.07-7.07L5.5 11.84" />
+                      </svg>
+                      {purposeImage ? 'Choose another image' : 'Choose image'}
+                    </button>
                     {(purposeImage || attachingPurposeImage) && (
-                      <div className={styles.purposeImageChip}>
+                      <div className={styles.purposeImageChip} title={imageName}>
                         {attachingPurposeImage ? (
                           <span className={styles.attachmentPlaceholder}>Loading image…</span>
                         ) : (
                           <>
-                            <img src={purposeImage!} alt="Attached image" className={styles.attachmentThumb} />
-                            <span>Attached — will inform the agent's design</span>
+                            <img src={purposeImage!} alt={imageName || 'Focus image'} className={styles.attachmentThumb} />
+                            {describingImage
+                              ? <span className={styles.attachmentPlaceholder}>Reading the image…</span>
+                              : <span>{imageName || 'Image'}</span>}
                             <button
                               type="button"
                               className={styles.attachmentRemove}
                               onClick={clearPurposeImage}
-                              aria-label="Remove attached image"
+                              aria-label="Remove image"
+                              disabled={bootstrapping}
                             >
                               ✕
                             </button>
@@ -2302,8 +2412,71 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                     )}
                   </div>
                 </div>
+                {imageDescription && (
+                  <div className={styles.briefNoteBox} role="note">
+                    <p className={styles.briefNoteText}>
+                      <span className={styles.briefNoteIcon} aria-hidden="true">i</span>{' '}
+                      What the agent sees: {imageDescription.length > 400 ? `${imageDescription.slice(0, 397)}…` : imageDescription}
+                    </p>
+                  </div>
+                )}
+              </>)}
+              {specialtiesOpen && focusMode === 'document' && (<>
+                <p className={styles.specialtiesHint}>
+                  {`The documents are the Focus: the agent reads and analyses them (PDF, Word, text, CSV; up to ${MAX_FOCUS_DOCS}).`}
+                </p>
+                <input
+                  ref={focusDocsInputRef}
+                  type="file"
+                  multiple
+                  accept=".pdf,.docx,.txt,.md,.markdown,.csv,.tsv,.json,.html,.htm,.xml,.log"
+                  className={styles.hiddenFileInput}
+                  onChange={handleFocusDocsChange}
+                />
+                <div className={styles.purposeImageRow}>
+                  <div className={styles.purposeImageLeft}>
+                    <button
+                      type="button"
+                      className={styles.focusAttachTextBtn}
+                      onClick={() => focusDocsInputRef.current?.click()}
+                      disabled={bootstrapping || focusDocs.length + readingDocs >= MAX_FOCUS_DOCS}
+                      title="Choose documents (PDF, Word, text, CSV) for the agent to analyse"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" width="16" height="16" aria-hidden="true">
+                        <path d="M16.5 6.5 8.7 14.3a3 3 0 1 0 4.24 4.24l7.1-7.1a5 5 0 1 0-7.07-7.07L5.5 11.84" />
+                      </svg>
+                      Choose documents
+                    </button>
+                    {focusDocs.map(d => (
+                      <div key={d.name} className={styles.purposeImageChip} title={d.truncated ? `${d.name}: only the first ${d.text.length.toLocaleString()} of ${d.chars.toLocaleString()} characters are used` : d.name}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" width="18" height="18" aria-hidden="true">
+                          <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+                          <path d="M14 3v5h5M9 13h6M9 17h6" />
+                        </svg>
+                        <span>{d.name}{d.truncated ? ' (first part)' : ''}</span>
+                        <button
+                          type="button"
+                          className={styles.attachmentRemove}
+                          onClick={() => removeFocusDoc(d.name)}
+                          aria-label={`Remove ${d.name}`}
+                          disabled={bootstrapping}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                    {readingDocs > 0 && (
+                      <div className={styles.purposeImageChip}>
+                        <span className={styles.attachmentPlaceholder}>Reading document…</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </>)}
+              {specialtiesOpen && attachError && (
+                <p className={`${styles.saveFeedbackText} ${styles.saveFeedbackError}`}>{attachError}</p>
               )}
-              {specialtiesOpen && (saveFeedback || draft.length > 0) && (
+              {specialtiesOpen && focusMode === 'keywords' && (saveFeedback || draft.length > 0) && (
                 <div className={styles.specialtiesActionsRow}>
                   {saveFeedback ? (
                     <p className={`${styles.saveFeedbackText} ${saveFeedback.includes('failed') ? styles.saveFeedbackError : styles.saveFeedbackSuccess}`}>
@@ -2316,7 +2489,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                   )}
                 </div>
               )}
-              {specialtiesOpen && (() => {
+              {specialtiesOpen && focusMode === 'keywords' && (() => {
                 // One worker per focus topic, up to the per-turn limit
                 // (Settings), so going past it changes what the agent does.
                 const limit = maxDelegations ?? DEFAULT_MAX_DELEGATIONS
@@ -2343,7 +2516,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                   </div>
                 )
               })()}
-              {specialtiesOpen && focusOverlaps.map(o => (
+              {specialtiesOpen && focusMode === 'keywords' && focusOverlaps.map(o => (
                 <div key={`${o.a}|${o.b}`} className={styles.focusWarnBox} role="note">
                   <p className={styles.briefNoteText}>
                     <span className={styles.focusWarnIcon} aria-hidden="true">⚠</span>{' '}
@@ -2364,6 +2537,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
             {/* The Saved Focus pool from the Agent Dossier, so focus can be
                 picked here without leaving the step. Renaming, deleting and
                 adding to the pool stay in the Dossier. */}
+            {focusMode === 'keywords' && (
             <div className={styles.focusPoolRow}>
               <SectionHeader
                 label="Saved Focus"
@@ -2442,6 +2616,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
               )}
               </>)}
             </div>
+            )}
 
           </div>
           </div>
@@ -2453,7 +2628,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
               showing. */}
           {setupStep === 'brief' && (
           <div className={`${styles.setupPanel} ${styles.briefSection}`} role="region" id="setup-panel-brief" aria-labelledby="setup-step-brief">
-            {keywords.length === 0 ? (
+            {!focusReady ? (
                 <p className={styles.briefPlaceholderText}>
                   <span className={styles.briefPlaceholderIcon} aria-hidden="true">✎</span>
                   Add Focus and behaviors to build this agent’s brief.
@@ -2575,7 +2750,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
               (deliverables) and are offered after every research turn. */}
           {setupStep === 'outputs' && (
           <div className={styles.setupPanel} role="region" id="setup-panel-outputs" aria-labelledby="setup-step-outputs">
-            {keywords.length === 0 ? (
+            {!focusReady ? (
               <p className={styles.briefPlaceholderText}>
                 <span className={styles.briefPlaceholderIcon} aria-hidden="true">✎</span>
                 Add Focus first: the agent proposes outputs for the job it's been given.
@@ -2722,9 +2897,9 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
             <button
               type="submit"
               form="agentSetupForm"
-              className={`${styles.profileCommissionBtn} ${styles.toolbarDeploy} ${keywords.length === 0 ? styles.profileCommissionBtnBlocked : ''}`}
+              className={`${styles.profileCommissionBtn} ${styles.toolbarDeploy} ${!focusReady ? styles.profileCommissionBtnBlocked : ''}`}
               disabled={bootstrapping}
-              aria-disabled={keywords.length === 0}
+              aria-disabled={!focusReady}
               title={reusableConfig
                 ? 'Deploy: this agent is already built from these steps, so it opens straight away'
                 : 'Deploy: build the agent from these steps and start the job'}

@@ -1,4 +1,4 @@
-import type { AgentConfig, AgentSpec, AgentTemplateId, ArmStat, BootstrapStreamEvent, Deliverable, EvalResultItem, LlmProvider, RelicKind, RelicSuggestion, SavedChatMessage, StreamEvent } from './types';
+import type { AgentConfig, AgentDocument, AgentSpec, AgentTemplateId, ArmStat, BootstrapStreamEvent, Deliverable, EvalResultItem, ExtractedDocument, LlmProvider, RelicKind, RelicSuggestion, SavedChatMessage, StreamEvent } from './types';
 
 const API_URL = import.meta.env.VITE_API_URL ?? '';
 
@@ -17,6 +17,7 @@ export async function bootstrap(
   signal?: AbortSignal,
   image?: string | null,
   spec?: AgentSpec,
+  documents?: AgentDocument[],
 ): Promise<AgentConfig> {
   const res = await fetch(`${API_URL}/bootstrap`, {
     method: 'POST',
@@ -28,6 +29,7 @@ export async function bootstrap(
       agentType: agentType ?? undefined,
       image: image ?? undefined,
       spec: spec ?? undefined,
+      documents: documents && documents.length > 0 ? documents : undefined,
     }),
     signal,
   });
@@ -226,6 +228,8 @@ export async function streamAgentBrief(
   lead: string | null,
   onEvent: (event: BriefStreamEvent) => void,
   signal?: AbortSignal,
+  // The Focus as documents or an image's description, instead of keywords.
+  documents?: AgentDocument[],
 ): Promise<{ brief: AgentBrief; map: BriefMap | null }> {
   const res = await fetch(`${API_URL}/brief-stream`, {
     method: 'POST',
@@ -243,6 +247,7 @@ export async function streamAgentBrief(
       behaviors: behaviors && behaviors.length > 0 ? behaviors : undefined,
       traits: traits && traits.length > 0 ? traits : undefined,
       lead: lead ?? undefined,
+      documents: documents && documents.length > 0 ? documents : undefined,
     }),
     signal,
   });
@@ -365,6 +370,7 @@ export async function fetchBriefOutputs(
   provider?: LlmProvider,
   ollamaModel?: string | null,
   signal?: AbortSignal,
+  documents?: AgentDocument[],
 ): Promise<Deliverable[] | null> {
   try {
     const res = await fetch(`${API_URL}/brief-outputs`, {
@@ -379,6 +385,7 @@ export async function fetchBriefOutputs(
         behaviors,
         provider: provider ?? undefined,
         ollama_model: ollamaModel ?? undefined,
+        documents: documents && documents.length > 0 ? documents : undefined,
       }),
     });
     if (!res.ok) return null;
@@ -875,4 +882,29 @@ export async function validateConfig(
     throw new Error(err.error ?? 'Validation failed');
   }
   return res.json();
+}
+
+// A document attached on Setup's Focus step: the backend returns its text
+// (documents.py), which then travels with the agent as AgentConfig.documents.
+export async function extractDocument(file: File): Promise<ExtractedDocument> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(`${API_URL}/brief-document`, { method: 'POST', body: form });
+  const data = await res.json().catch(() => ({ error: res.status === 413 ? 'The file is too large.' : res.statusText }));
+  if (!res.ok) throw new Error(data.error ?? 'Could not read the document');
+  return data as ExtractedDocument;
+}
+
+// An image given as the Focus: a vision model describes it once
+// (POST /brief-image, documents.describe_image) and the description stands
+// in for it like a document's text. null when no vision model is available.
+export async function describeImage(image: string, provider?: LlmProvider): Promise<string | null> {
+  const res = await fetch(`${API_URL}/brief-image`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image, provider: provider ?? undefined }),
+  });
+  const data = await res.json().catch(() => ({ error: res.status === 413 ? 'The image is too large.' : res.statusText }));
+  if (!res.ok) throw new Error(data.error ?? 'Could not read the image');
+  return typeof data.description === 'string' && data.description.trim() ? data.description : null;
 }

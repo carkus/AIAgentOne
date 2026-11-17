@@ -84,7 +84,7 @@
   flex-wrap: wrap;
   gap: 0.45rem;
   min-height: 52px;
-  padding: 0.6rem 2.5rem 0.6rem 0.75rem;
+  padding: 0.6rem 0.75rem;
   align-items: center;
   position: relative;
   transition: border-color 0.15s, box-shadow 0.15s;
@@ -202,7 +202,7 @@
   letter-spacing: 0.03em;
 }
 
-/* Paperclip at the right end of the Focus field. */
+/* Save Focus at the right end of the Focus field. */
 .focusAttachBtn {
   position: absolute;
   top: 0.7rem;
@@ -231,9 +231,36 @@
   cursor: not-allowed;
 }
 
-/* Save Focus sits just left of the paperclip, same look. */
+/* "Attach image or document" under the Focus field: the field's corner
+   button look (.focusAttachBtn) with its label written out. */
+.focusAttachTextBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 1.9rem;
+  padding: 0 0.7rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-accent-secondary);
+  border-radius: 8px;
+  color: var(--color-accent-secondary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.focusAttachTextBtn:hover:not(:disabled) {
+  background: var(--color-accent-secondary);
+  color: #fff;
+}
+
+.focusAttachTextBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .focusSaveBtn {
-  right: 2.5rem;
+  right: 0.5rem;
 }
 
 .focusSaveIcon {
@@ -248,7 +275,7 @@
 }
 
 .chipAreaWithSave {
-  padding-right: 4.5rem;
+  padding-right: 2.5rem;
 }
 
 /* "N chars remaining": the same small mono caption as the app's other
@@ -3315,10 +3342,6 @@
   opacity: 0.5;
 }
 
-/* Not factored in: the map fades back, the switch stays readable. */
-.locationMapOff .locationMapPlace {
-  opacity: 0.45;
-}
 
 .locationMapPlace:hover:not(:disabled) .locationMapName {
   text-decoration: underline;
@@ -3529,14 +3552,20 @@
   color: var(--color-accent);
 }
 
-/* The location pill to match. */
+/* The location pill to match: unticked like an unselected pill (not
+   faded), ticked like a selected one. */
 .typeRow .typeLocation .locationMap {
-  background: #edf5f9;
-  border-color: #b4d2df;
+  background: var(--color-surface);
+  border-color: var(--color-border);
+}
+
+.typeRow .typeLocation .locationMap:not(.locationMapOff) {
+  background: rgba(5, 55, 80, 0.1);
+  border-color: var(--color-accent);
 }
 
 .typeRow .typeLocation .locationMapPlace {
-  background: #edf5f9;
+  background: transparent;
 }
 
 /* Retry on the brief's "couldn't be drafted" note: drafts the AI brief again. */
@@ -3571,4 +3600,31 @@
 .traitsPanel .behaviorToggle:hover:not(:disabled) {
   border-color: var(--color-accent);
   color: var(--color-accent);
+}
+
+/* The Focus step's Keywords / Image / Document tabs: AgentPool's filter
+   pills, with the shared pill radius. */
+.focusTabs {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.focusTab,
+.focusTabActive {
+  border: none;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-size-xs);
+  padding: 0.25rem 0.7rem;
+}
+
+.focusTab {
+  background: rgba(40, 75, 106, 0.08);
+  color: var(--color-text);
+}
+
+.focusTabActive {
+  background: var(--color-accent);
+  color: #fff;
 }

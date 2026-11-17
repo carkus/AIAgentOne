@@ -12,6 +12,7 @@ import agent_spec
 import eval_checks
 import eval_log
 import mcp_client
+import documents as _documents
 
 logger = logging.getLogger(__name__)
 
@@ -542,6 +543,7 @@ def _normalize_intro(config: dict) -> None:
 def _build_prompt(
     purpose: str, provider: str | None, is_worker: bool, agent_type: str | None = None,
     has_image: bool = False, spec: dict | None = None, report: dict | None = None,
+    documents: list[dict] | None = None,
 ) -> tuple[str, int]:
     """Grounds the bootstrap prompt in real data (CLAUDE.md RAG priority 5 +
     MCP priority 6): past similar bootstraps as few-shot examples, and the
@@ -676,6 +678,9 @@ def _build_prompt(
         "system_prompt, and tools you design, the same way a keyword would, "
         "rather than only acknowledging that an image exists.\n"
     ) if has_image else ""
+    # Focus-step documents: excerpts only; the agent gets the full text at
+    # runtime (agent_stream.py, documents.runtime_note).
+    image_note += _documents.bootstrap_note(documents or [])
     # No file-writing tool: answers become files through exports (relic.py),
     # which the platform offers on every reply. _drop_save_output_tools
     # removes one if the model writes it anyway.
@@ -878,6 +883,7 @@ def _model_event(meta: dict) -> dict:
 def generate_agent_config_stream(
     purpose: str, provider: str | None = None, model: str | None = None, is_worker: bool = False,
     agent_type: str | None = None, image: str | None = None, spec: dict | None = None,
+    documents: list[dict] | None = None,
 ):
     """
     _generate_agent_config_stream (below) with its run trace attached: every
@@ -890,7 +896,7 @@ def generate_agent_config_stream(
     prev_sink = run_trace.open_sink()
     try:
         for event in _generate_agent_config_stream(
-            purpose, provider, model, is_worker, agent_type, image, spec,
+            purpose, provider, model, is_worker, agent_type, image, spec, documents,
         ):
             if event.get("type") == "done" and isinstance(event.get("config"), dict):
                 event["config"]["bootstrap_trace"] = run_trace.drain()
@@ -902,6 +908,7 @@ def generate_agent_config_stream(
 def _generate_agent_config_stream(
     purpose: str, provider: str | None = None, model: str | None = None, is_worker: bool = False,
     agent_type: str | None = None, image: str | None = None, spec: dict | None = None,
+    documents: list[dict] | None = None,
 ):
     """
     Streaming counterpart to generate_agent_config, used only by server.py's
@@ -930,9 +937,11 @@ def _generate_agent_config_stream(
         "agent_type": agent_type,
         "requested": {"provider": provider, "model": model},
         "has_image": bool(image),
+        "documents": [d["name"] for d in documents or []],
     }
     prompt, fewshot_count = _build_prompt(
         purpose, provider, is_worker, agent_type, has_image=bool(image), spec=spec, report=report,
+        documents=documents,
     )
     user_content = _build_user_content(prompt, image, provider)
     if fewshot_count:

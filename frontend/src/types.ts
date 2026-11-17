@@ -127,6 +127,10 @@ export interface AgentConfig {
   // agent_stream.py tells the agent to work toward them and always offers
   // them as relic buttons on research turns.
   deliverables?: Deliverable[];
+  // Documents attached on Setup's Focus step (POST /brief-document), as
+  // plain text: agent_stream.py puts them in the agent's instructions every
+  // turn so it can analyse them (backend documents.py caps the size).
+  documents?: AgentDocument[];
   // The job's workers (agent_stream.py's team): reused by later turns
   // instead of bootstrapping new ones. Set from each `done` event's team.
   team?: TeamMember[];
@@ -393,4 +397,16 @@ export interface SavedChat {
   agentConfig: AgentConfig;
   messages: SavedChatMessage[];
   savedAt: number;
+}
+
+// One document's text, as stored on AgentConfig.documents.
+export interface AgentDocument {
+  name: string;
+  text: string;
+}
+
+// POST /brief-document's reply: the text plus how long the file really was.
+export interface ExtractedDocument extends AgentDocument {
+  chars: number;
+  truncated: boolean;
 }
