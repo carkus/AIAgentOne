@@ -82,6 +82,15 @@ export interface AgentBrief {
   warning?: string | null;
   // Media the model offers for this commission (brief.py); built only on click.
   relics?: RelicSuggestion[];
+  // One-click changes the brief offers for a tension or gap it spotted
+  // (brief.py's _clean_choices): lead with / drop an existing topic, or add one.
+  choices?: BriefChoice[];
+}
+
+export interface BriefChoice {
+  action: 'lead' | 'drop' | 'add';
+  topic: string;
+  label: string;
 }
 
 export interface BriefMap {
@@ -214,6 +223,7 @@ export async function streamAgentBrief(
   maxDelegations: number | null | undefined,
   behaviors: string[] | undefined,
   traits: string[] | undefined,
+  lead: string | null,
   onEvent: (event: BriefStreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<{ brief: AgentBrief; map: BriefMap | null }> {
@@ -232,6 +242,7 @@ export async function streamAgentBrief(
       maxDelegations: maxDelegations ?? undefined,
       behaviors: behaviors && behaviors.length > 0 ? behaviors : undefined,
       traits: traits && traits.length > 0 ? traits : undefined,
+      lead: lead ?? undefined,
     }),
     signal,
   });
@@ -628,6 +639,8 @@ export interface AgentDraft {
   /** Absent on profiles saved before these were kept. */
   factorLocation?: boolean;
   outputs?: RelicKind[];
+  /** The Focus topic the user made the lead (a brief choice). */
+  leadTopic?: string;
   /** The agent as last built from this profile; reloading it skips
    * bootstrap. Absent when it was never deployed, or the steps changed since. */
   builtConfig?: AgentConfig;
@@ -637,6 +650,7 @@ export interface AgentDraft {
 /** The parts of a profile beyond name/type/focus/location/character. */
 export interface AgentDraftExtras {
   factorLocation?: boolean;
+  leadTopic?: string | null;
   outputs?: RelicKind[];
   /** null clears a stale build; leave out to keep whatever is stored. */
   builtConfig?: AgentConfig | null;

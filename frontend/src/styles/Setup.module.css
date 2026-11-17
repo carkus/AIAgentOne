@@ -1263,6 +1263,19 @@
   padding: 0.65rem 0.75rem;
 }
 
+/* The brief's dot points: the bullet larger than the text, same colour. */
+.briefBullet {
+  font-size: 1.5em;
+  line-height: 0;
+  vertical-align: -0.1em;
+}
+
+/* A heading line over a group of the brief's dot points. */
+.briefHeading {
+  color: var(--color-accent);
+  font-weight: 700;
+}
+
 .briefLoadingHint {
   color: var(--graph-50);
   font-style: italic;

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { bootstrap, buildBriefRelic, createAgentDraft, createSavedSearch, deleteAgentDraft, deleteSavedSearch, fetchBriefOutputs, streamAgentBrief, fetchFocusInsights, fetchModelInfo, listAgentDrafts, listPublishedAgents, listSavedSearches, unpublishAgent, updateAgentDraft } from '../api'
-import type { AgentBrief, AgentDraft, BriefMap, BriefPartId, BriefStageId, BriefStreamEvent, FocusInsights, PublishedAgent, SavedSearch } from '../api'
+import type { AgentBrief, AgentDraft, BriefChoice, BriefMap, BriefPartId, BriefStageId, BriefStreamEvent, FocusInsights, PublishedAgent, SavedSearch } from '../api'
 import { getLastOpenedPointer, hideSavedChat, loadHiddenChatIds, loadSavedChats, saveChat, setLastOpenedPointer } from '../chatStorage'
 import type { AgentConfig, AgentTemplateId, ArmStat, BootstrapStreamEvent, Deliverable, LlmProvider, Relic, RelicKind, RelicSuggestion, SavedChat, SavedChatMessage, SearchDefaults } from '../types'
 import { AGENT_TEMPLATES, getTemplate, PERSONALITY_TRAITS, describeTraitEffect, BEHAVIOR_TOGGLES, DEFAULT_AGENT_SPEC, MAX_FOCUS_CHARS, shortFocus, type BehaviorToggle } from '../agentTypes'
@@ -42,13 +42,14 @@ interface BuildInputs {
   toggles: string[]
   traits: string[]
   outputs: string[]
+  lead: string | null
 }
 
 function buildKey(b: BuildInputs): string {
   const sorted = (xs: string[]) => [...xs].sort()
   return JSON.stringify([
     b.template, sorted(b.keywords), b.location.trim(), b.factorLocation,
-    sorted(b.toggles), sorted(b.traits), sorted(b.outputs),
+    sorted(b.toggles), sorted(b.traits), sorted(b.outputs), (b.lead ?? '').toLowerCase(),
   ])
 }
 
@@ -61,6 +62,7 @@ function configBuildKey(cfg: AgentConfig): string {
     toggles: cfg.active_toggles ?? [],
     traits: cfg.active_traits ?? [],
     outputs: (cfg.deliverables ?? []).map(d => d.kind),
+    lead: cfg.lead_topic ?? null,
   })
 }
 
@@ -372,6 +374,25 @@ function lastChatLine(messages: SavedChatMessage[]): string | null {
   const text = last.content.trim().replace(/\s+/g, ' ')
   const truncated = text.length > CHAT_PREVIEW_MAX_LEN ? `${text.slice(0, CHAT_PREVIEW_MAX_LEN - 1)}…` : text
   return last.role === 'user' ? `You: ${truncated}` : truncated
+}
+
+// The brief: groups of "• " dot points, each under its own heading line.
+// Bullets are drawn larger than the text and heading lines as headings. A
+// brief without dot points (the template fallback, older briefs) is shown
+// as it is.
+function bigBullets(text: string): React.ReactNode {
+  const lines = text.split('\n')
+  const pointy = lines.some(l => l.startsWith('•'))
+  return lines.map((line, i) => {
+    const nl = i < lines.length - 1 ? '\n' : ''
+    if (line.startsWith('•')) {
+      return <span key={i}><span className={styles.briefBullet} aria-hidden="true">•</span>{line.slice(1)}{nl}</span>
+    }
+    if (pointy && line.trim()) {
+      return <span key={i}><span className={styles.briefHeading}>{line}</span>{nl}</span>
+    }
+    return <span key={i}>{line}{nl}</span>
+  })
 }
 
 function formatSavedAt(ts: number, format: DateFormatId): string {
@@ -855,7 +876,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
       }
     }
     return streamAgentBrief(agentType, [...keywords], usedLocation, agentName, provider, activeModel,
-      priorQuestion, priorAnswer, maxDelegations, behaviorLabels, traitLabels, onEvent)
+      priorQuestion, priorAnswer, maxDelegations, behaviorLabels, traitLabels, lead, onEvent)
       .then(({ brief, map }) => {
         if (requestId !== briefRequestIdRef.current) return null
         setAiBrief(brief)
@@ -871,7 +892,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
 
   const briefInputsKey = JSON.stringify([
     agentType, keywords, usedLocation, agentName, maxDelegations,
-    [...activeToggles].sort(), [...selectedTraits].sort(),
+    [...activeToggles].sort(), [...selectedTraits].sort(), lead,
   ])
 
   useEffect(() => {
@@ -983,6 +1004,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     toggles: activeToggles,
     traits: currentTraitIds,
     outputs: chosenDeliverables.map(d => d.kind),
+    lead,
   })
   const loadedBuild: AgentConfig | undefined = editing?.kind === 'draft'
     ? drafts.find(d => d.id === editing.id)?.builtConfig
@@ -1273,9 +1295,30 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     setKeywords(prev => prev.map(k => k.toLowerCase() === lowerOld ? next : k))
   }
 
+  // A brief choice (brief.py's _clean_choices): lead moves the topic to the
+  // front and marks it the lead, drop removes it, add adds a new topic.
+  // The changed Focus re-drafts the brief on its own.
+  function applyBriefChoice(c: BriefChoice) {
+    if (bootstrapping) return
+    const lower = c.topic.toLowerCase()
+    if (c.action === 'lead') {
+      if (!keywords.some(k => k.toLowerCase() === lower)) return
+      setLeadTopic(c.topic)
+      setKeywords(prev => [
+        ...prev.filter(k => k.toLowerCase() === lower),
+        ...prev.filter(k => k.toLowerCase() !== lower),
+      ])
+    } else if (c.action === 'drop') {
+      removeKeyword(c.topic)
+    } else {
+      addSavedKeyword(c.topic.slice(0, MAX_FOCUS_CHARS))
+    }
+  }
+
   function removeKeyword(kw: string) {
     if (bootstrapping) return
     setKeywords(prev => prev.filter(k => k.toLowerCase() !== kw.toLowerCase()))
+    if (leadTopic?.toLowerCase() === kw.toLowerCase()) setLeadTopic(null)
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -1347,7 +1390,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     const traitPool = PERSONALITY_TRAITS[agentType] ?? PERSONALITY_TRAITS.research
     const traits = traitPool.filter(t => selectedTraits.includes(t.id)).map(t => t.label)
     // Keep the built agent only while it still matches these steps.
-    const extras = { factorLocation, outputs: chosenDeliverables.map(d => d.kind), builtConfig: reusableConfig }
+    const extras = { factorLocation, leadTopic: lead, outputs: chosenDeliverables.map(d => d.kind), builtConfig: reusableConfig }
     try {
       let updated: AgentDraft | null = null
       if (editing?.kind === 'draft') {
@@ -1457,7 +1500,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
   function rememberBuild(built: AgentConfig) {
     const traits = (PERSONALITY_TRAITS[agentType] ?? PERSONALITY_TRAITS.research)
       .filter(t => selectedTraits.includes(t.id)).map(t => t.label)
-    const extras = { factorLocation, outputs: chosenDeliverables.map(d => d.kind), builtConfig: built }
+    const extras = { factorLocation, leadTopic: lead, outputs: chosenDeliverables.map(d => d.kind), builtConfig: built }
     const create = () => createAgentDraft(agentName, agentType, [...keywords], location.trim(), traits, [...activeToggles], extras)
     const save = editing?.kind === 'draft'
       ? updateAgentDraft(editing.id, agentName, agentType, [...keywords], location.trim(), traits, [...activeToggles], extras).catch(create)
@@ -1642,6 +1685,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     const traitPool = PERSONALITY_TRAITS[agentType] ?? PERSONALITY_TRAITS.research
     const traitInstructions = traitPool.filter(t => selectedTraits.includes(t.id)).map(t => t.instruction)
     const purpose = getTemplate(agentType).buildPurpose(keywords, loc) +
+      (lead ? ` Treat "${lead}" as the lead focus: frame the work around it, with the other focus topics supporting or qualifying it.` : '') +
       (activeInstructions.length > 0 ? ` ${activeInstructions.join(' ')}` : '') +
       (traitInstructions.length > 0 ? ` ${traitInstructions.join(' ')}` : '') +
       (chosenDeliverables.length > 0
@@ -1723,6 +1767,17 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     await runBootstrap()
   }
 
+  // The brief's one-click choices, minus any the current Focus already
+  // makes moot (an add over the topic limit, a lead that's already the lead).
+  const briefChoices: BriefChoice[] = keywords.length === 0 || aiBrief?.type !== 'brief'
+    ? []
+    : (aiBrief.choices ?? []).filter(c => {
+        const has = keywords.some(k => k.toLowerCase() === c.topic.toLowerCase())
+        if (c.action === 'add') return !has && keywords.length < MAX_SPECIALTIES
+        if (c.action === 'lead') return has && c.topic.toLowerCase() !== (lead ?? '').toLowerCase()
+        return has && keywords.length > 1
+      })
+
   const briefWarning = keywords.length === 0
     ? null
     // The model's own note wins; with none (or a disclaimer the backend
@@ -1761,14 +1816,14 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
 
   const briefTextEl = (
     <p className={styles.agentSummaryText}>
-      {briefDraftText ?? aiBrief?.text ?? buildAgentBrief(
+      {bigBullets(briefDraftText ?? aiBrief?.text ?? buildAgentBrief(
         agentType,
         keywords,
         usedLocation,
         agentName,
         BEHAVIOR_TOGGLES.filter(t => activeToggles.includes(t.id)).map(t => t.label),
         (PERSONALITY_TRAITS[agentType] ?? PERSONALITY_TRAITS.research).filter(t => selectedTraits.includes(t.id)).map(t => t.label),
-      )}
+      ))}
     </p>
   )
 
@@ -2115,7 +2170,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                         disabled={bootstrapping}
                         title={`Edit ${kw}`}
                       >
-                        {shortFocus(kw)}
+                        {shortFocus(kw)}{lead === kw && ' · lead'}
                       </button>
                       <button
                         type="button"
@@ -2442,9 +2497,22 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                     </p>
                   )}
                   </div>
-                  {briefWarning && (
+                  {(briefWarning || briefChoices.length > 0) && (
                     <div className={styles.briefNoteBox} role="note">
-                      <p className={styles.briefNoteText}><span className={styles.briefNoteIcon} aria-hidden="true">i</span> {briefWarning}</p>
+                      <p className={styles.briefNoteText}>
+                        {briefWarning && <><span className={styles.briefNoteIcon} aria-hidden="true">i</span> {briefWarning}{' '}</>}
+                        {briefChoices.map(c => (
+                          <button
+                            key={`${c.action}|${c.topic}`}
+                            type="button"
+                            className={styles.focusInlineAction}
+                            onClick={() => applyBriefChoice(c)}
+                            disabled={bootstrapping || briefLoading}
+                          >
+                            {c.label}
+                          </button>
+                        ))}
+                      </p>
                     </div>
                   )}
                   {briefRelicError && !briefRelicPreview && (

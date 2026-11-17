@@ -24,7 +24,7 @@ sentence, that's a prompt regression, not an acceptable output.
 Active Behavior toggles and Personality traits (Setup.tsx's BEHAVIOR_TOGGLES
 / PERSONALITY_TRAITS — e.g. "Max Delegation", "Meticulous") change what the
 bootstrapped agent will actually do just as much as a specialty does, so the
-brief gives them their own paragraph, naming every one selected and its
+brief gives them their own group of dot points, naming every one selected and its
 concrete effect on these focuses, rather than only ever discussing the
 keywords. See generate_brief's `behaviors`/`traits` args.
 
@@ -85,6 +85,44 @@ def _relic_suggestions(raw) -> list[dict]:
             suggestions.append({"kind": kind, "reason": reason[:200]})
     return suggestions[:2]
 
+CHOICE_ACTIONS = ("lead", "drop", "add")
+
+
+def _clean_choices(raw, keywords: list[str], lead: str | None) -> list[dict]:
+    """The brief's one-click choices, kept only when each does something
+    real: lead/drop must name an existing topic (returned in its own
+    spelling), add must name a new one. Anything else is dropped, so the
+    model can't offer a button that does nothing."""
+    by_lower = {k.strip().lower(): k for k in keywords if isinstance(k, str) and k.strip()}
+    lead_lower = (lead or "").strip().lower()
+    out: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict):
+            continue
+        action = str(item.get("action") or "").strip().lower()
+        topic = re.sub(r"\s+", " ", str(item.get("topic") or "")).strip().strip('"\'')
+        label = re.sub(r"\s+", " ", str(item.get("label") or "")).strip()
+        if action not in CHOICE_ACTIONS or not topic:
+            continue
+        lower = topic.lower()
+        if action in ("lead", "drop"):
+            if lower not in by_lower or len(by_lower) < 2:
+                continue
+            if action == "lead" and lower == lead_lower:
+                continue
+            topic = by_lower[lower]
+        elif lower in by_lower or len(topic) > 60:
+            continue
+        if (action, lower) in seen:
+            continue
+        seen.add((action, lower))
+        if not label or len(label) > 40:
+            label = {"lead": "Lead with", "drop": "Drop", "add": "Add"}[action] + f" {topic}"
+        out.append({"action": action, "topic": topic, "label": label[:60]})
+    return out[:3]
+
+
 def _topic_count_bullet(count: int, limit: int) -> str:
     if count <= limit:
         return ""
@@ -138,7 +176,7 @@ _CASE_PROMPT = """You are drafting the short "Brief" shown on an AI agent platfo
 Agent type: {agent_type}
 Agent name: {agent_name}
 Specialties/keywords: {keywords}
-{location_line}Active behaviors: {behaviors}
+{lead_line}{location_line}Active behaviors: {behaviors}
 Active personality traits: {traits}
 {prior_qa}
 """
@@ -147,27 +185,27 @@ _ASK_RULE = """Most of the time, just write the brief directly and confidently �
 
 """
 
-_SHAPE_RULE = """When writing the brief: third person, THREE short paragraphs separated by a blank line (written as \n\n inside the JSON string, never a raw line break), roughly 8-11 sentences in all. It should read as a considered write-up of this particular agent, not a one-liner.
+_SHAPE_RULE = """When writing the brief: third person, short dot points in THREE groups separated by a blank line (written as \n\n inside the JSON string; \n between points), about 5-8 points in all. Start each group with ONE short heading line of its own (2-5 words, no "#", no "**", no colon, no bullet) that says what this group is about for THIS case, so the reader sees why these points sit together (e.g. "Where solar meets farm risk", not "Paragraph 1" or "Focus"). Each point starts with "• " and is one short sentence (under ~20 words). Keep only what matters most: it should read as a sharp, considered take on this particular agent, not a write-up.
 
 """
 
-_P1_RULE = """PARAGRAPH 1, the focuses: your analytical read of the combination, not the list. Open with what these specialties mean TOGETHER that none of them means alone: the intersection they define, the underlying goal they imply, or which one is load-bearing and which ones narrow or qualify it. Then analyse that combination: why it is more useful than covering each specialty separately, where they pull against each other or leave a gap, and one concrete, specific scenario where commissioning this agent would actually pay off (a real situation, not "this could be useful for various purposes"). Do NOT open by naming the keywords one after another, and never name more than two keywords in a single sentence; refer to them through what they combine into (e.g. "solar", "insurance", "farms" becomes "the risk side of putting solar on agricultural land", not "solar, insurance and farms"). If this paragraph would read the same with the keywords shuffled, or a reader could reconstruct it from the keyword list alone, it is a keyword walk: rewrite it.{location_rule}
+_P1_RULE = """GROUP 1, the focuses: your analytical read of the combination, not the list. Lead with what these specialties mean TOGETHER that none of them means alone: the intersection they define, the underlying goal they imply, or which one is load-bearing and which ones narrow or qualify it. Then only the most telling of: where they pull against each other or leave a gap, or one concrete, specific scenario where commissioning this agent would actually pay off (a real situation, not "this could be useful for various purposes"). Do NOT open by naming the keywords one after another, and never name more than two keywords in a single sentence; refer to them through what they combine into (e.g. "solar", "insurance", "farms" becomes "the risk side of putting solar on agricultural land", not "solar, insurance and farms"). If this group would read the same with the keywords shuffled, or a reader could reconstruct it from the keyword list alone, it is a keyword walk: rewrite it.{location_rule}
 
 """
 
-_P2_RULE = """PARAGRAPH 2, its character: how the selected personality traits and behaviors shape the way it will tackle THESE focuses. Name EVERY active trait and behavior listed above (none may be left out), each tied to a concrete effect on this case: what it will do differently with these specialties because of it (e.g. "Meticulous" means it will flag where the evidence on crop-insurance terms is thin rather than smoothing it over; "Max Delegation" means each focus goes to its own worker agent and the main agent only compares their findings). Where two selections interact or pull against each other (e.g. "Concise" with "Cite Sources"), say how that plays out. Never just list the labels. If both traits and behaviors are "(none)", keep this paragraph to one sentence on the plain, default way it will work.
+_P2_RULE = """GROUP 2, its character: how the selected personality traits and behaviors shape the way it will tackle THESE focuses. Name EVERY active trait and behavior listed above (none may be left out; related ones can share a point), each tied to a concrete effect on this case: what it will do differently with these specialties because of it (e.g. "Meticulous" means it will flag where the evidence on crop-insurance terms is thin rather than smoothing it over; "Max Delegation" means each focus goes to its own worker agent and the main agent only compares their findings). Where two selections interact or pull against each other (e.g. "Concise" with "Cite Sources"), say how that plays out. Never just list the labels. If both traits and behaviors are "(none)", one point on the plain, default way it will work.
 
 """
 
-_P3_RULE = """PARAGRAPH 3, the work: what the agent will actually do and what it will report back with, as 2-3 concrete actions that follow from paragraphs 1 and 2 (not one action per keyword). Vary the wording agent to agent; never fall back on a fixed shape like "Agent {agent_name} will... If commissioned, it will... and report back with..." that would make two briefs read like the same mail-merge with different nouns swapped in.
+_P3_RULE = """GROUP 3, the work: what the agent will actually do and what it will report back with, as 2-3 concrete actions that follow from groups 1 and 2 (not one action per keyword). Vary the wording agent to agent; never fall back on a fixed shape like "Agent {agent_name} will... If commissioned, it will... and report back with..." that would make two briefs read like the same mail-merge with different nouns swapped in.
 
 """
 
-_THIN_RULE = """Not enough to go on (should be RARE): only when the specialties together give you genuinely nothing to analyse (e.g. a single generic word, or terms you cannot place at all) and no single clarifying question would fix it, say so plainly in the brief instead of padding it out (it can be shorter than three paragraphs then, but still cover the selected traits and behaviors): one sentence on what you can infer, one on what is missing for a real read, and what kind of specialty the user could add. Do not use this to dodge a combination that just takes some thought; almost any set of two or more specific specialties has a direction worth stating.
+_THIN_RULE = """Not enough to go on (should be RARE): only when the specialties together give you genuinely nothing to analyse (e.g. a single generic word, or terms you cannot place at all) and no single clarifying question would fix it, say so plainly in the brief instead of padding it out (it can be shorter than three groups then, but still cover the selected traits and behaviors): one point on what you can infer, one on what is missing for a real read, and what kind of specialty the user could add. Do not use this to dodge a combination that just takes some thought; almost any set of two or more specific specialties has a direction worth stating.
 
 """
 
-_NOTE_RULE = """Separately from the ambiguity check above, also consider whether something about how this agent is set up will shape the results in a way the user should know before commissioning it. If so, add ONE "warning": an informative note shown as a tip under the brief, not an error message. Write it as 1-2 plain, friendly sentences addressed to the user ("you"): say what this means for THIS commission in practice (name the actual topics, keywords or gap involved) and what they could do about it if they want to. Never restate a situation below as a label or rule, and no alarm words ("warning", "error", "danger"). Situations worth a note:
+_NOTE_RULE = """Separately from the ambiguity check above, also consider whether something about how this agent is set up will shape the results in a way the user should know before commissioning it. If so, add ONE "warning": an informative note shown as a tip under the brief, not an error message. Write it as 1-2 plain, friendly sentences addressed to the user ("you"): say what this means for THIS commission in practice (name the actual topics, keywords or gap involved) and how the agent will handle it by default. Never ask the user to clarify, choose, specify or type anything: this screen is point and click, so the note states, it doesn't ask. Any change they could make goes in "choices" as a button. Never restate a situation below as a label or rule, and no alarm words ("warning", "error", "danger"). Situations worth a note:
 {topic_count_bullet}- Specialties spanning clearly unrelated domains (e.g. "tax law" and "vintage motorcycles"): the agent's persona and searches will be split between them rather than focused.
 - A specialty that explicitly asks for binding legal, medical, financial, or safety advice (e.g. "tell me which pills to take"): it will research and summarise the topic, not act as a professional adviser. Only when a specialty actually asks for that; never as a general disclaimer.
 {location_bullet}If more than one situation applies, write about the one that changes the results most. Never mention the agent type's internal id. A note is never a disclaimer: never write about what the agent will not do, capabilities it lacks, or other kinds of agent it isn't.
@@ -179,15 +217,23 @@ _RELICS_RULE = """When you write a brief (not a question), also offer up to two 
 
 """
 
+_CHOICES_RULE = """When you write a brief (not a question), also offer up to three one-click "choices" that steer this agent, ONLY when the setup has a real tension or gap worth acting on (specialties pulling in different directions, one that dilutes the rest, an obvious missing angle); otherwise []. The user cannot type here, so each choice is a button that does exactly one thing:
+- {{"action": "lead", "topic": "<an existing specialty, exactly as given>", "label": "..."}}: make that specialty the lead; the others then support or qualify it.
+- {{"action": "drop", "topic": "<an existing specialty, exactly as given>", "label": "..."}}: remove that specialty.
+- {{"action": "add", "topic": "<a new specialty, 1-4 words>", "label": "..."}}: add a specialty that closes a gap.
+"label" is the button text, 2-5 words (e.g. "Lead with history", "Drop image creation"). When choices answer a split, offer ones pointing different ways (e.g. lead with each side), so the user picks a direction rather than confirming one.{lead_choice_note} If a note mentions the tension, the choices are how the user acts on it.
+
+"""
+
 _ONESHOT_FORMAT = """Respond with ONLY raw JSON, no markdown code fences, no other text, exactly one of:
-{{"type": "brief", "text": "...", "warning": "..." or null, "relics": [{{"kind": "...", "reason": "..."}}]}}
+{{"type": "brief", "text": "...", "warning": "..." or null, "relics": [{{"kind": "...", "reason": "..."}}], "choices": [{{"action": "...", "topic": "...", "label": "..."}}]}}
 {{"type": "question", "text": "...", "warning": "..." or null}}
 """
 
 # The one-call brief (generate_brief): the pieces above in their original order.
 _BRIEF_PROMPT = (
     _CASE_PROMPT + _ASK_RULE + "{case_type_rule}\n" + _SHAPE_RULE + _P1_RULE
-    + _P2_RULE + _P3_RULE + _THIN_RULE + _NOTE_RULE + _RELICS_RULE + _ONESHOT_FORMAT
+    + _P2_RULE + _P3_RULE + _THIN_RULE + _NOTE_RULE + _RELICS_RULE + _CHOICES_RULE + _ONESHOT_FORMAT
 )
 
 
@@ -203,17 +249,19 @@ def generate_brief(
     max_delegations: int | None = None,
     behaviors: list[str] | None = None,
     traits: list[str] | None = None,
+    lead: str | None = None,
 ) -> dict | None:
     """
     Returns {"type": "brief" | "question", "text": "...", "warning": "..." | None,
-    "relics": [{"kind", "reason"}, ...]} (relics empty for a question)
+    "relics": [{"kind", "reason"}, ...], "choices": [{"action", "topic", "label"}, ...]}
+    (relics and choices empty for a question)
     or None if the call/parse failed — callers should fall back to the
     deterministic template brief on None rather than surfacing an error,
     since this is a nice-to-have polish step, not a required one.
     """
     prompt = _BRIEF_PROMPT.format(**_prompt_fields(
         agent_type, keywords, location, agent_name, prior_question, prior_answer,
-        max_delegations, behaviors, traits,
+        max_delegations, behaviors, traits, lead,
     ))
 
     try:
@@ -243,7 +291,10 @@ def generate_brief(
         if not text:
             return None
         relics = _relic_suggestions(data.get("relics")) if kind == "brief" else []
-        return {"type": kind, "text": text, "warning": warning, "relics": relics}
+        choices = _clean_choices(data.get("choices"), keywords, lead) if kind == "brief" else []
+        if kind == "brief":
+            text = _points_text(text) or text
+        return {"type": kind, "text": text, "warning": warning, "relics": relics, "choices": choices}
     except Exception as e:
         # Logged so a silent template fallback in production can be traced.
         logger.warning("brief: generation failed (%s): %s", provider or "default", e)
@@ -267,7 +318,7 @@ def _clean_warning(raw, location: str) -> str | None:
 
 def _prompt_fields(
     agent_type, keywords, location, agent_name, prior_question, prior_answer,
-    max_delegations, behaviors, traits,
+    max_delegations, behaviors, traits, lead=None,
 ) -> dict:
     """Every placeholder the brief prompt pieces use, for the one-call brief
     and each stage of the streamed one alike."""
@@ -297,7 +348,18 @@ def _prompt_fields(
         '(e.g. "local events" for a whole country).\n'
         if location else ""
     )
+    lead = next((k for k in keywords if lead and k.strip().lower() == lead.strip().lower()), None)
+    lead_line = (
+        f'Lead specialty (the user chose it): "{lead}". The others support or qualify it; '
+        "frame the brief around it.\n" if lead and len(keywords) > 1 else ""
+    )
+    lead_choice_note = (
+        f' The user already made "{lead}" the lead, so never offer leading with it again.'
+        if lead_line else ""
+    )
     return dict(
+        lead_line=lead_line,
+        lead_choice_note=lead_choice_note,
         agent_type=agent_type or "general",
         agent_name=agent_name or "Agent",
         keywords=", ".join(keywords) if keywords else "(none yet)",
@@ -329,7 +391,7 @@ Specialties/keywords: {keywords}
 Return:
 - "ask": what the user is commissioning, in one line.
 - "understood": 2-4 instructions the agent takes from it and holds itself to (its angle, its scope, what its traits and behaviors make it do).
-- "work": 2-5 lines of work it will actually split the job into (an angle or a worker each, the split the brief's last paragraph describes), each {{"label": "2-5 word title", "detail": "one line on what that branch digs into"}}.
+- "work": 2-5 lines of work it will actually split the job into (an angle or a worker each, the split the brief's last group describes), each {{"label": "2-5 word title", "detail": "one line on what that branch digs into"}}.
 - "result": the finished thing it hands back, in one line.
 
 Respond with ONLY raw JSON, no markdown code fences, no other text:
@@ -379,6 +441,8 @@ def generate_brief_map(
 
 
 # ---------------------------------------------------------------------------
+# The brief is three groups, each a short heading line then "• " points, written as
+# "paragraphs" 1-3 below (the names stayed).
 # The staged brief (POST /brief-stream). The one-call brief writes three
 # paragraphs, the note and the media offers in one long reply, then a second
 # call draws the graph from it, with nothing on screen until both finish.
@@ -392,7 +456,7 @@ def generate_brief_map(
 # or any paragraph failing, falls back to the one-call brief and graph.
 # ---------------------------------------------------------------------------
 
-_READ_PART = """Your part of this brief: decide how to proceed, add any note, and offer media. Other writers are drafting the brief's paragraphs at the same time, so do not write them.
+_READ_PART = """Your part of this brief: decide how to proceed, add any note, offer media, and offer choices. Other writers are drafting the brief's paragraphs at the same time, so do not write them.
 
 Choose "type":
 - "question": the clarifying-question rule above applies. Put the ONE question in "text".
@@ -402,17 +466,17 @@ Choose "type":
 """
 
 _READ_FORMAT = """Respond with ONLY raw JSON, no markdown code fences, no other text:
-{{"type": "brief" or "question" or "thin", "text": "..." or "", "warning": "..." or null, "relics": [{{"kind": "...", "reason": "..."}}]}}
+{{"type": "brief" or "question" or "thin", "text": "..." or "", "warning": "..." or null, "relics": [{{"kind": "...", "reason": "..."}}], "choices": [{{"action": "...", "topic": "...", "label": "..."}}]}}
 """
 
-_PARAGRAPH_PART = """The brief is third person, about 8-11 sentences over three paragraphs, and each paragraph is drafted by a different writer at the same time. Write ONLY the paragraph described below; the others are covered, so stay inside its remit.
+_PARAGRAPH_PART = """The brief is third person, about 5-8 short dot points in three groups, and each group is drafted by a different writer at the same time. Write ONLY the group described below; the others are covered, so stay inside its remit.
 
 """
 
-_PARAGRAPH_FORMAT = """Write {sentences} sentences. Reply with the paragraph only: plain prose, no heading, no label, no quotes, no JSON, no markdown.
+_PARAGRAPH_FORMAT = """Start the group with ONE short heading line of its own (2-5 words, no "#", no "**", no colon, no bullet) that says what this group is about for THIS case, so the reader sees why these points sit together (e.g. "Where solar meets farm risk", not "Paragraph 1" or "Focus"). Then write {sentences} dot points, one per line, each starting with "• " and each one short sentence (under ~20 words). Keep only what matters most. Reply with the heading line and the dot points only: no label, no quotes, no JSON, no other markdown.
 """
 
-_PLAN_PART = """The first two paragraphs of the brief are written:
+_PLAN_PART = """The first two groups of the brief are written:
 
 <paragraph_1>
 {p1}
@@ -422,21 +486,21 @@ _PLAN_PART = """The first two paragraphs of the brief are written:
 {p2}
 </paragraph_2>
 
-Write paragraph 3 so it follows on from them without repeating what they say.
+Write group 3 so it follows on from them without repeating what they say. Start the group with ONE short heading line of its own (2-5 words, no "#", no "**", no colon, no bullet) that says what this group is about for THIS case, so the reader sees why these points sit together (e.g. "Where solar meets farm risk", not "Paragraph 1" or "Focus"). Then 2-3 dot points, each starting with "• " and one short sentence (under ~20 words).
 
 """
 
-_PLAN_MAP = """Then draw the whole brief (all three paragraphs) as a flow chart the user sees beside it. Short plain phrases (under ~14 words each), synthesised from the brief, never a copy of the keyword list:
+_PLAN_MAP = """Then draw the whole brief (all three groups) as a flow chart the user sees beside it. Short plain phrases (under ~14 words each), synthesised from the brief, never a copy of the keyword list:
 - "ask": what the user is commissioning, in one line.
 - "understood": 2-4 instructions the agent takes from it and holds itself to (its angle, its scope, what its traits and behaviors make it do).
-- "work": 2-5 lines of work it will actually split the job into (an angle or a worker each, the split paragraph 3 describes), each {{"label": "2-5 word title", "detail": "one line on what that branch digs into"}}.
+- "work": 2-5 lines of work it will actually split the job into (an angle or a worker each, the split group 3 describes), each {{"label": "2-5 word title", "detail": "one line on what that branch digs into"}}.
 - "result": the finished thing it hands back, in one line.
 
 Respond with ONLY raw JSON, no markdown code fences, no other text:
-{{"text": "paragraph 3", "map": {{"ask": "...", "understood": ["..."], "work": [{{"label": "...", "detail": "..."}}], "result": "..."}}}}
+{{"text": "group 3: the heading line, then its dot points, separated by \\n", "map": {{"ask": "...", "understood": ["..."], "work": [{{"label": "...", "detail": "..."}}], "result": "..."}}}}
 """
 
-_READ_PROMPT = _CASE_PROMPT + _ASK_RULE + "{case_type_rule}\n" + _READ_PART + _NOTE_RULE + _RELICS_RULE + _READ_FORMAT
+_READ_PROMPT = _CASE_PROMPT + _ASK_RULE + "{case_type_rule}\n" + _READ_PART + _NOTE_RULE + _RELICS_RULE + _CHOICES_RULE + _READ_FORMAT
 _FOCUS_PROMPT = _CASE_PROMPT + "{case_type_rule}\n" + _PARAGRAPH_PART + _P1_RULE + _PARAGRAPH_FORMAT
 _CHARACTER_PROMPT = _CASE_PROMPT + "{case_type_rule}\n" + _PARAGRAPH_PART + _P2_RULE + _PARAGRAPH_FORMAT
 _PLAN_PROMPT = _CASE_PROMPT + "{case_type_rule}\n" + _PLAN_PART + _P3_RULE + _PLAN_MAP
@@ -456,14 +520,51 @@ def _parse_json(raw: str) -> dict:
     return data
 
 
-def _paragraph(raw: str) -> str:
-    """One plain paragraph from a reply: no fences, label or stray breaks."""
+_BULLET_RE = re.compile(r"^\s*(?:[•\-*\u2013\u2014]|\d+[.)])\s+")
+
+
+_HEADING_JUNK_RE = re.compile(r"^[#*_\s]+|[*_:\s]+$")
+
+# Fallback headings when a writer leaves its heading out.
+GROUP_HEADINGS = {"focus": "The focus", "character": "How it works", "plan": "The work"}
+
+
+def _paragraph(raw: str, heading: str | None = None) -> str:
+    """One group of the brief from a reply: a short heading line, then one
+    "• " point per line. No fences, label or quotes. A reply in plain prose
+    becomes one point. `heading` is used when the reply has none."""
     text = raw.strip().strip("`").strip()
-    text = re.sub(r"^(?:#+\s*)?(?:\*\*)?paragraph\s*\d\s*[:.\-—]*(?:\*\*)?\s*", "", text, flags=re.IGNORECASE)
-    text = " ".join(line.strip() for line in text.splitlines() if line.strip())
+    text = re.sub(r"^(?:#+\s*)?(?:\*\*)?(?:paragraph|group)\s*\d\s*[:.\-—]*(?:\*\*)?\s*", "", text, flags=re.IGNORECASE)
     if len(text) >= 2 and text[0] == text[-1] == '"':
         text = text[1:-1].strip()
-    return text
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    title = None
+    # A first line that isn't a point, followed by more lines, is the heading.
+    if len(lines) > 1 and not _BULLET_RE.match(lines[0]) and len(lines[0]) <= 80:
+        title = _HEADING_JUNK_RE.sub("", lines.pop(0)) or None
+    if not any(_BULLET_RE.match(ln) for ln in lines):
+        points = [" ".join(lines)] if lines else []
+    else:
+        points = []
+        for ln in lines:
+            if _BULLET_RE.match(ln):
+                points.append(_BULLET_RE.sub("", ln, count=1).strip())
+            elif points:
+                points[-1] += " " + ln  # a point wrapped onto a second line
+    body = "\n".join("• " + p for p in points if p)
+    if not body:
+        return ""
+    title = title or heading
+    return f"{title}\n{body}" if title else body
+
+
+def _points_text(text: str) -> str:
+    """The one-call brief's text as headed groups of "• " points."""
+    groups = [g for g in re.split(r"\n\s*\n", text.strip()) if g.strip()]
+    defaults = list(GROUP_HEADINGS.values())
+    return "\n\n".join(
+        _paragraph(g, defaults[i] if i < len(defaults) else None) for i, g in enumerate(groups)
+    )
 
 
 def _stage_call(stage: str, prompt: str, provider, model, max_tokens: int, temperature: float) -> str:
@@ -559,6 +660,7 @@ def generate_brief_stream(
     max_delegations: int | None = None,
     behaviors: list[str] | None = None,
     traits: list[str] | None = None,
+    lead: str | None = None,
 ):
     """Yields NDJSON-ready events:
       {"type": "stage", "stage": "search"|"read"|"focus"|"character"|"plan", "state": "active"|"done"|"failed", "ms"?}
@@ -569,7 +671,7 @@ def generate_brief_stream(
     """
     fields = _prompt_fields(
         agent_type, keywords, location, agent_name, prior_question, prior_answer,
-        max_delegations, behaviors, traits,
+        max_delegations, behaviors, traits, lead,
     )
     started = time.monotonic()
 
@@ -583,7 +685,7 @@ def generate_brief_stream(
         yield {"type": "fallback", "message": "Writing the brief in one go instead…"}
         brief = generate_brief(
             agent_type, keywords, location, agent_name, provider, model,
-            prior_question, prior_answer, max_delegations, behaviors, traits,
+            prior_question, prior_answer, max_delegations, behaviors, traits, lead,
         )
         if brief is None:
             yield {"type": "error", "message": "Could not generate a brief"}
@@ -597,8 +699,8 @@ def generate_brief_stream(
 
     jobs = {
         "read": (_READ_PROMPT.format(**fields), 4000, 0.4),
-        "focus": (_FOCUS_PROMPT.format(**fields, sentences="3 to 4"), 3000, 0.6),
-        "character": (_CHARACTER_PROMPT.format(**fields, sentences="2 to 4"), 3000, 0.6),
+        "focus": (_FOCUS_PROMPT.format(**fields, sentences="2 to 3"), 3000, 0.6),
+        "character": (_CHARACTER_PROMPT.format(**fields, sentences="1 to 3"), 3000, 0.6),
     }
     # "read" and "focus" wait for a quick web search over the topics (so a
     # bare name gets placed rather than asked about); "character" doesn't
@@ -642,7 +744,7 @@ def generate_brief_stream(
                     if stage == "read":
                         read = _parse_json(raw)
                     else:
-                        text = _paragraph(raw)
+                        text = _paragraph(raw, GROUP_HEADINGS[stage])
                         if not text:
                             raise ValueError("empty paragraph")
                         paragraphs[stage] = text
@@ -659,6 +761,7 @@ def generate_brief_stream(
                         "text": str(read["text"]).strip(),
                         "warning": _clean_warning(read.get("warning"), location),
                         "relics": [],
+                        "choices": [],
                     }, "map": None}
                     return
                 if stage != "read":
@@ -677,13 +780,14 @@ def generate_brief_stream(
     # offers, and Setup shows its code-checked note instead.
     warning = _clean_warning(read.get("warning"), location) if read else None
     relics = _relic_suggestions(read.get("relics")) if read else []
+    choices = _clean_choices(read.get("choices"), keywords, lead) if read else []
 
     yield {"type": "stage", "stage": "plan", "state": "active"}
     plan_prompt = _PLAN_PROMPT.format(**fields, p1=paragraphs["focus"], p2=paragraphs["character"])
     try:
         raw, ms = timed("plan", plan_prompt, 4000, 0.5)
         plan = _parse_json(raw)
-        p3 = _paragraph(str(plan.get("text") or ""))
+        p3 = _paragraph(str(plan.get("text") or ""), GROUP_HEADINGS["plan"])
         if not p3:
             raise ValueError("no paragraph 3")
     except Exception as e:
@@ -700,6 +804,7 @@ def generate_brief_stream(
         "text": "\n\n".join([paragraphs["focus"], paragraphs["character"], p3]),
         "warning": warning,
         "relics": relics,
+        "choices": choices,
     }, "map": brief_map}
 
 

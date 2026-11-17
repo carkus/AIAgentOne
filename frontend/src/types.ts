@@ -134,6 +134,9 @@ export interface AgentConfig {
   // "Factor in location" on Setup. Absent = the type's default (on only for
   // job_search); agent_stream.py drops the location when false.
   factor_location?: boolean;
+  // The Focus topic the user made the lead from a brief choice: the brief,
+  // bootstrap purpose and agent_stream.py's team rule frame the job around it.
+  lead_topic?: string | null;
   provider?: LlmProvider;
   // Which locally-pulled Ollama model to use; ignored unless provider === 'ollama'.
   // undefined/null = the backend's OLLAMA_MODEL default.

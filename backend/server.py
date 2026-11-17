@@ -222,6 +222,7 @@ def brief():
         max_delegations=body.get("maxDelegations"),
         behaviors=body.get("behaviors") or None,
         traits=body.get("traits") or None,
+        lead=(str(body.get("lead") or "").strip() or None),
     )
     if result is None:
         return jsonify({"error": "Could not generate a brief"}), 502
@@ -256,6 +257,7 @@ def brief_stream():
         max_delegations=body.get("maxDelegations"),
         behaviors=body.get("behaviors") or None,
         traits=body.get("traits") or None,
+        lead=(str(body.get("lead") or "").strip() or None),
     )
 
     def generate():

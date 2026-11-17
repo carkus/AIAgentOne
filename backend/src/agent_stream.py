@@ -1167,7 +1167,7 @@ def _worker_context(context: str, focus_pool: list[str]) -> str:
     return f"{context}\n\n{note}" if context else note
 
 
-def _delegation_rule_body(keywords: list[str], max_delegations: int) -> str:
+def _delegation_rule_body(keywords: list[str], max_delegations: int, lead: str | None = None) -> str:
     """
     Rule 6's body, in the system prompt built by run_agent_stream.
 
@@ -1181,8 +1181,14 @@ def _delegation_rule_body(keywords: list[str], max_delegations: int) -> str:
     """
     if keywords:
         pool = ", ".join(f'"{k}"' for k in keywords)
+        lead = next((k for k in keywords if lead and k.strip().lower() == str(lead).strip().lower()), None)
+        lead_note = (
+            f' The user made "{lead}" the LEAD topic: frame the job and your'
+            " report around it, give it the most workers, and use the other"
+            " topics to support or qualify it." if lead and len(keywords) > 1 else ""
+        )
         return f"""
-   YOU LEAD A TEAM. This job's focus topics are: {pool}. For any research
+   YOU LEAD A TEAM. This job's focus topics are: {pool}.{lead_note} For any research
    turn on the job (starting it, or following one of your options), plan
    how to split the work across AT LEAST 2 and at most {max_delegations}
    workers, then call delegate_to_worker once per worker before writing
@@ -1637,7 +1643,7 @@ clarifying question only belongs AFTER you've already produced real findings
    e.g. [Title of the talk](https://www.youtube.com/watch?v=...). The user
    sees it as a player in the reply. Never invent or guess a video URL.
 """ + (f"""
-8. You also have `delegate_to_worker`.{_delegation_rule_body(agent_config.get("keywords") or [], max_delegations)}{_team_note(team, max_delegations)}
+8. You also have `delegate_to_worker`.{_delegation_rule_body(agent_config.get("keywords") or [], max_delegations, agent_config.get("lead_topic"))}{_team_note(team, max_delegations)}
 9a. Each worker's result has `next_options`: the next moves it devised for
    its own topic. Build YOUR ```options block from those (pick the most
    interesting, merge near-duplicates, at most 4), so the user can choose

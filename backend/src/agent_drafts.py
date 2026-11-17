@@ -25,6 +25,11 @@ def _clean_extras(extras: dict | None) -> dict:
     out = {}
     if isinstance(extras.get("factorLocation"), bool):
         out["factorLocation"] = extras["factorLocation"]
+    lead = extras.get("leadTopic")
+    if isinstance(lead, str) and lead.strip():
+        out["leadTopic"] = lead.strip()[:200]
+    elif "leadTopic" in extras:
+        out["leadTopic"] = None  # cleared: _apply drops it
     outputs = extras.get("outputs")
     if isinstance(outputs, list):
         out["outputs"] = [o for o in outputs if isinstance(o, str)][:12]
@@ -47,6 +52,8 @@ def _apply(entry: dict) -> dict:
     """Drops a cleared builtConfig rather than storing null."""
     if entry.get("builtConfig") is None:
         entry.pop("builtConfig", None)
+    if not entry.get("leadTopic"):
+        entry.pop("leadTopic", None)
     return entry
 
 
