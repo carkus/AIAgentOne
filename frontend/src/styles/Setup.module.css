@@ -3288,12 +3288,20 @@
 
 .locationMapToggle {
   flex: none;
-  align-self: center;
   width: 0.9rem;
   height: 0.9rem;
-  margin: 0 0.5rem;
+  margin: 0;
   accent-color: var(--graph-100);
   cursor: pointer;
+  /* Round: drawn by hand, since a native checkbox can't be. */
+  appearance: none;
+  border: 1.5px solid var(--graph-100);
+  border-radius: 50%;
+  background: var(--color-surface);
+}
+
+.locationMapToggle:checked {
+  background: radial-gradient(circle, var(--graph-100) 45%, var(--color-surface) 50%);
 }
 
 .locationMapToggle:disabled {
@@ -3408,10 +3416,106 @@
   margin-left: auto;
 }
 
-.topTools,
-.locationMap {
+.locationRow .locationMap {
+  border-color: #d9e9ef;
+}
+
+/* White like the toolbar buttons beside it, not the tinted map grid. */
+.locationRow .locationMapPlace {
+  min-height: 2rem; /* the toolbar buttons' height inside its wrapper */
+  background: var(--color-surface);
+  color: #3f7ea0;
+}
+
+.topTools {
   position: relative;
   top: 6px;
+}
+
+/* The location card in the Type section: below the type buttons, only as
+   wide as it needs. */
+/* Type's row: the type buttons, a pipe, then the job's location. */
+.typeRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.typeRowDivider {
+  color: var(--color-accent);
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+.typeRow .typeLocation { /* outranks AgentHeader .toolbox whatever the CSS load order */
+  flex-wrap: nowrap;
+  /* No wrapper around it: just the location pill and the tickbox. */
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+/* Pill-shaped: the wrapper, the place and the tickbox button all fully rounded. */
+.typeLocation,
+.typeLocation .locationMap {
+  border-radius: 999px;
+}
+
+/* Less padding inside its light-blue border: the same height as the
+   Type/Personality/Behaviour pills beside it. */
+.typeLocation .locationMapPlace {
+  min-height: 0;
+  padding: 0.3rem 0.5rem 0.3rem 0.6rem;
+}
+
+/* The tickbox inside the location pill, after the place name. */
+.locationMapToggleWrap {
+  display: flex;
+  align-items: center;
+  padding: 0 0.6rem 0 0.1rem;
+  cursor: pointer;
+}
+
+/* The place name in the same lettering as the Type/Personality/Behaviour
+   pills (.behaviorIconLabel), with no label box of its own. */
+.typeLocation .locationMapName {
+  padding: 0;
+  background: none;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: var(--font-size-sm);
+  font-weight: 400;
+  letter-spacing: 0.03em;
+  line-height: 1.15;
+  text-transform: uppercase;
+}
+
+/* The Character step's Type, Personality and Behaviour pills look like the
+   location pill: white, light-blue border, fully rounded, #3f7ea0 text.
+   Selected ones keep their own colours. Advanced Setup is unchanged. */
+.traitsPanel .behaviorIconBtn,
+.traitsPanel .behaviorIconBtnActive,
+.traitsPanel .behaviorToggle,
+.traitsPanel .behaviorToggleActive {
+  border-radius: 999px;
+}
+
+/* Light-blue body and darker border: the toolbars' values (.topTools). */
+.traitsPanel .behaviorIconBtn,
+.traitsPanel .behaviorToggle {
+  background: #edf5f9;
+  border-color: #b4d2df;
+  color: #3f7ea0;
+}
+
+/* The location pill to match. */
+.typeRow .typeLocation .locationMap {
+  background: #edf5f9;
+  border-color: #b4d2df;
+}
+
+.typeRow .typeLocation .locationMapPlace {
+  background: #edf5f9;
 }
 
 /* Retry on the brief's "couldn't be drafted" note: drafts the AI brief again. */
@@ -3439,4 +3543,11 @@
 .briefRetryBtn:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+/* Keep the usual hover above the scoped colours. */
+.traitsPanel .behaviorIconBtn:hover:not(:disabled),
+.traitsPanel .behaviorToggle:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-text);
 }

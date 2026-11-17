@@ -429,8 +429,18 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     localStorage.setItem('aiagent_agent_type', agentType)
   }, [agentType])
   const [keywords, setKeywords] = useState<string[]>([])
+  // The Focus topic made the lead from a brief choice; null = no lead.
+  const [leadTopic, setLeadTopic] = useState<string | null>(null)
+  const lead = leadTopic && keywords.length > 1
+    ? keywords.find(k => k.toLowerCase() === leadTopic.toLowerCase()) ?? null
+    : null
   const [draft, setDraft] = useState('')
-  const [location, setLocation] = useState('Melbourne, Australia')
+  // The user's own location (Settings, auto-detected on load), and the job's
+  // location filter: null = follow the user's location; set per job from the
+  // Type section's map and saved with the job.
+  const [homeLocation, setHomeLocation] = useState('Melbourne, Australia')
+  const [jobLocation, setJobLocation] = useState<string | null>(null)
+  const location = jobLocation ?? homeLocation
   // Whether the location is passed on at all (brief, bootstrap purpose,
   // agent config). Off by default except for Job search: "Augustus in
   // Melbourne" is what you get when every topic is told where the user is.
@@ -1073,7 +1083,8 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
           : { icon: '📦', title: 'Outputs', state: 'pending', detail: 'Proposed on the Outputs step' }
     const columns: ColumnNode<ProcessNodeData>[][] = [
       [{ id: 'character', data: { icon: '🎭', title: 'Character', state: 'done',
-        items: [getTemplate(agentType).label, ...character],
+        // With Factor in location on, the location the agent will use.
+        items: [getTemplate(agentType).label, ...(usedLocation ? [`Using location: ${usedLocation}`] : []), ...character],
         detail: character.length > 0 ? undefined : 'No traits or behaviour chosen' } }],
       [{ id: 'focus', data: keywords.length > 0
         ? { icon: '🎯', title: 'Focus', state: 'done', items: keywords.map(k => shortFocus(k).toUpperCase()),
@@ -1114,7 +1125,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
   }
 
   function handleLocationChange(value: string) {
-    setLocation(value)
+    setHomeLocation(value)
     window.clearTimeout(locationDebounceRef.current)
     const query = value.trim()
     if (query.length < 3) {
@@ -1126,7 +1137,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
   }
 
   function selectLocation(name: string) {
-    setLocation(name)
+    setHomeLocation(name)
     setLocationSuggestions([])
     setShowLocationSuggestions(false)
   }
@@ -1149,7 +1160,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
           if (res.ok) {
             const data = await res.json()
             const name: string | undefined = data?.display_name
-            if (name) setLocation(prev => (force || prev === 'Melbourne, Australia' ? name : prev))
+            if (name) setHomeLocation(prev => (force || prev === 'Melbourne, Australia' ? name : prev))
           }
         } catch {
           // Offline or Nominatim unreachable — keep whatever location is set.
@@ -1189,6 +1200,8 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     if (bootstrapping) return
     setEditing(null)
     setKeywords([])
+    setLeadTopic(null)
+    setJobLocation(null)
     setDraft('')
     setActiveToggles([])
     setSelectedTraits([])
@@ -1428,8 +1441,9 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
       ...chat.agentConfig,
       template: agentType,
       keywords: [...keywords],
-      location: usedLocation,
+      location: location.trim(),
       factor_location: factorLocation,
+      lead_topic: lead,
       active_toggles: [...activeToggles],
       active_traits: [...selectedTraits],
       deliverables: chosenDeliverables.length > 0 ? chosenDeliverables : chat.agentConfig.deliverables,
@@ -1451,8 +1465,9 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
       ? d.outputs.map(kind => ({ kind, title: RELIC_LABELS[kind] ?? kind }))
       : null)
     setKeywords(d.keywords.slice(0, MAX_SPECIALTIES))
+    setLeadTopic(d.leadTopic ?? null)
     setDraft('')
-    if (d.location) setLocation(d.location)
+    setJobLocation(d.location || null)
     const toggles = [...(d.behaviorToggles ?? [])]
     setActiveToggles(toggles)
     const pool = PERSONALITY_TRAITS[type] ?? PERSONALITY_TRAITS.research
@@ -1550,8 +1565,9 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     // older configs all carry a location, so "has a location" isn't a signal.
     setFactorLocation(cfg.factor_location ?? (cfg.template ?? 'general') === 'job_search')
     setKeywords((cfg.keywords ?? []).slice(0, MAX_SPECIALTIES))
+    setLeadTopic(cfg.lead_topic ?? null)
     setDraft('')
-    if (cfg.location) setLocation(cfg.location)
+    setJobLocation(cfg.location || null)
     setRestoredOutputs(cfg.deliverables && cfg.deliverables.length > 0
       ? cfg.deliverables.map(({ kind, title }) => ({ kind, title }))
       : null)
@@ -1719,8 +1735,9 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
       const built: AgentConfig = {
         ...config,
         keywords,
-        location: loc,
+        location: location.trim(),
         factor_location: factorLocation,
+        lead_topic: lead,
         provider,
         ollama_model: provider === 'ollama' || provider === 'cloudflare' ? activeModel : null,
         template: agentType,
@@ -1933,34 +1950,6 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                 )}
               </div>
               </div>
-            <div className={`${styles.locationMap} ${!factorLocation ? styles.locationMapOff : ''}`}>
-              <button
-                type="button"
-                className={styles.locationMapPlace}
-                onClick={() => setLocationMapOpen(true)}
-                disabled={bootstrapping}
-                title="Change the search location on a map"
-                aria-haspopup="dialog"
-              >
-                <svg className={styles.locationMapPin} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z" />
-                  <circle cx="12" cy="9.5" r="2.5" />
-                </svg>
-                <span className={styles.locationMapName}>{location || 'No location set'}</span>
-              </button>
-              {/* Factor in location: a small tickbox at the card's right. */}
-              <input
-                type="checkbox"
-                className={styles.locationMapToggle}
-                checked={factorLocation}
-                onChange={ev => setFactorLocation(ev.target.checked)}
-                disabled={bootstrapping}
-                aria-label="Factor in location"
-                title={factorLocation
-                  ? 'Factor in location: on. The location is passed to the agent, which applies it only to location-dependent topics.'
-                  : 'Factor in location: off. The location is not passed to the agent at all.'}
-              />
-            </div>
             </div>
           </div>
 
@@ -2009,12 +1998,13 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                 label="Type"
                 expanded={typeOpen}
                 onToggle={() => setTypeOpen(o => !o)}
-                help="Type: what kind of agent this is. Required, one of these. It sets the brief's template and which personality traits are on offer below."
+                help="Type: what kind of agent this is. Required, one of these. It sets the brief's template and which personality traits are on offer below. Beside it, the job's location: it starts as your location from Settings, can be changed for this job on the map and is saved with it. The tickbox decides whether the agent uses it at all."
                 right={!typeOpen && (
-                  <span className={styles.fieldLabelCount}>{getTemplate(agentType).label}</span>
+                  <span className={styles.fieldLabelCount}>{getTemplate(agentType).label}{usedLocation ? ` · ${usedLocation}` : ''}</span>
                 )}
               />
               {typeOpen && (
+                <div className={styles.typeRow}>
                 <div className={styles.behaviorIconRow} role="radiogroup" aria-label="Agent type">
                   {AGENT_TEMPLATES.map(t => {
                     const active = agentType === t.id
@@ -2034,6 +2024,48 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                       </button>
                     )
                   })}
+                </div>
+                <span className={styles.typeRowDivider} aria-hidden="true">|</span>
+                {/* The job's location filter: starts as the user's location,
+                    changed per job, saved with it; the tickbox decides whether
+                    it's passed to the agent at all. */}
+                  <div className={`${ah.group} ${ah.toolbox} ${styles.locationRow} ${styles.typeLocation}`}>
+                  <div className={`${styles.locationMap} ${!factorLocation ? styles.locationMapOff : ''}`}>
+                    <button
+                      type="button"
+                      className={styles.locationMapPlace}
+                      onClick={() => setLocationMapOpen(true)}
+                      disabled={bootstrapping}
+                      title="Change this job's location on a map (it starts as your location from Settings)"
+                      aria-haspopup="dialog"
+                    >
+                      <svg className={styles.locationMapPin} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z" />
+                        <circle cx="12" cy="9.5" r="2.5" />
+                      </svg>
+                      <span className={styles.locationMapName}>{location || 'No location set'}</span>
+                    </button>
+                  {/* Factor in location: a tickbox inside the same pill, after the place. */}
+                  <label
+                    className={styles.locationMapToggleWrap}
+                    title={factorLocation
+                      ? 'Factor in location: on. The location is passed to the agent, which applies it only to location-dependent topics.'
+                      : 'Factor in location: off. The location is not passed to the agent at all.'}
+                  >
+                    <input
+                      type="checkbox"
+                      className={styles.locationMapToggle}
+                      checked={factorLocation}
+                      onChange={ev => setFactorLocation(ev.target.checked)}
+                      disabled={bootstrapping}
+                      aria-label="Factor in location"
+                      title={factorLocation
+                        ? 'Factor in location: on. The location is passed to the agent, which applies it only to location-dependent topics.'
+                        : 'Factor in location: off. The location is not passed to the agent at all.'}
+                    />
+                  </label>
+                  </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -3103,7 +3135,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
       <SettingsModal
         isOpen={settingsOpen}
         onClose={() => setSettingsOpen(false)}
-        location={location}
+        location={homeLocation}
         onLocationChange={handleLocationChange}
         locationSuggestions={locationSuggestions}
         showLocationSuggestions={showLocationSuggestions}
@@ -3180,7 +3212,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
         isOpen={locationMapOpen}
         location={location}
         onClose={() => setLocationMapOpen(false)}
-        onSelect={selectLocation}
+        onSelect={name => setJobLocation(name)}
       />
       <ScoreboardModal
         isOpen={scoreboardOpen}
