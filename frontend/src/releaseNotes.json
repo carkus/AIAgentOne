@@ -10,6 +10,21 @@
       "kind": "fix",
       "title": "Model on the right in the deployment header",
       "text": "On the deployment page the model and web search line now sit at the far right of the header, as they do on Setup."
+    },
+    {
+      "kind": "fix",
+      "title": "Case file before Where to next",
+      "text": "Under each answer, the case file and export bar now comes before the Where to next options, with a clear gap between them."
+    },
+    {
+      "kind": "feature",
+      "title": "Or ask a question",
+      "text": "Under the latest answer's Where to next options there is now a box to ask the agent your own question directly."
+    },
+    {
+      "kind": "fix",
+      "title": "Case file before the reply's Next steps",
+      "text": "When a reply ends with its own **Next steps** list, the Case file and export bar now sits above that list, so all the follow-up choices are together at the bottom."
     }
   ],
   "releases": [

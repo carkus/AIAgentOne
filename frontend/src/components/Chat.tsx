@@ -1,5 +1,5 @@
 import { isValidElement, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { type Components } from 'react-markdown'
 import { MarkdownLink } from './VideoEmbed'
 import remarkGfm from 'remark-gfm'
 import { buildRelic, publishAgent, runAgent } from '../api'
@@ -54,6 +54,17 @@ function extractJsonBlobs(content: string): { text: string; blobs: unknown[] } {
     }
   })
   return { text: paragraphs.join('\n\n'), blobs }
+}
+
+// A reply that ends with its own "Next steps" section (a heading or a line
+// like "**Next Steps:**" followed by the list) is split there, so the case
+// file bar can sit between the answer and its next steps.
+const NEXT_STEPS_RE = /^[ \t]*(?:#{1,6}[ \t]*)?(?:\*\*|__)?[ \t]*next steps?[ \t]*:?[ \t]*(?:\*\*|__)?[ \t]*:?[ \t]*$/gim
+function splitNextSteps(text: string): { body: string; nextSteps: string | null } {
+  let last = -1
+  for (const m of text.matchAll(NEXT_STEPS_RE)) last = m.index ?? -1
+  if (last <= 0) return { body: text, nextSteps: null }
+  return { body: text.slice(0, last).trimEnd(), nextSteps: text.slice(last).trim() }
 }
 
 // The text a message shows. Chats saved before the report label lost its
@@ -389,6 +400,8 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
   // walk react-markdown's actual output (link hrefs, list/heading structure)
   // instead of re-parsing the raw markdown string itself.
   const markdownRefs = useRef<Map<number, HTMLDivElement>>(new Map())
+  // A reply's closing "Next steps" section, rendered below the case file bar.
+  const markdownTailRefs = useRef<Map<number, HTMLDivElement>>(new Map())
   // Sentinel scrolled into view on every feed update (new message, streamed
   // tool_start/tool_result, finished reply) so the transcript follows along
   // live instead of leaving a fast-moving run sitting below the fold.
@@ -433,6 +446,8 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
   // index, which is stable for the lifetime of one chat session's array.
   // Graph view is the default for every reply; this holds the ones switched to the log.
   const [logViewMessages, setLogViewMessages] = useState<Set<number>>(new Set())
+  // The "Or ask a question" box under the latest answer's Where to next.
+  const [askText, setAskText] = useState('')
   const [caseFileMessages, setCaseFileMessages] = useState<Set<number>>(new Set())
   function toggleCaseFile(i: number) {
     setCaseFileMessages(prev => {
@@ -755,7 +770,7 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
       const isUser = msg.role === 'user'
       const label = isUser ? 'You' : `Agent ${agentName}`
       const bodyHtml = !isUser && markdownRefs.current.get(i)
-        ? markdownRefs.current.get(i)!.innerHTML
+        ? markdownRefs.current.get(i)!.innerHTML + (markdownTailRefs.current.get(i)?.innerHTML ?? '')
         : escapeToParagraphs(shownText)
       blocks.push(
         `<div style="margin:0 0 1.1em;">` +
@@ -1118,6 +1133,65 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
     ...(agentConfig.active_toggles ?? []).map(id => BEHAVIOR_TOGGLES.find(t => t.id === id)?.label ?? id),
   ]
 
+  // How a reply's Markdown renders: code blocks, wide tables, links,
+  // enlargeable images, and an Expand button on every list item.
+  const markdownComponents: Components = {
+    pre({ children }) {
+      const codeEl = children as React.ReactElement<{ className?: string }> | undefined
+      const className = codeEl?.props?.className ?? ''
+      const lang = /language-(\S+)/.exec(className)?.[1] ?? 'text'
+      return <CodeBlock language={lang}>{children}</CodeBlock>
+    },
+    code({ className, children, ...props }) {
+      return <code className={className} {...props}>{children}</code>
+    },
+    table({ children, ...props }) {
+      return (
+        <div className={styles.tableWrap}>
+          <table {...props}>{children}</table>
+        </div>
+      )
+    },
+    a: MarkdownLink,
+    img({ src, alt, ...props }) {
+      return (
+        <button
+          type="button"
+          className={styles.researchImageBtn}
+          onClick={() => typeof src === 'string' && setViewerImage(src)}
+          aria-label={alt || 'Enlarge image'}
+        >
+          <img
+            src={src}
+            alt={alt}
+            loading="lazy"
+            className={styles.researchImage}
+            {...props}
+          />
+        </button>
+      )
+    },
+    li({ children, ...props }) {
+      const idea = listItemPlainText(children).trim()
+      return (
+        <li {...props}>
+          {children}
+          {idea && (
+            <button
+              type="button"
+              className={styles.extendIdeaButton}
+              title="Ask the agent to expand on this idea"
+              disabled={thinking}
+              onClick={() => sendMessage(`Extend upon this idea: ${idea}`, messages, undefined, undefined, true)}
+            >
+              Expand ↗
+            </button>
+          )}
+        </li>
+      )
+    },
+  }
+
   return (
     <div className={styles.root}>
       {showBriefing && (
@@ -1421,88 +1495,14 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
                             else markdownRefs.current.delete(i)
                           }}
                         >
-                          <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
-                            components={{
-                              pre({ children }) {
-                                const codeEl = children as React.ReactElement<{ className?: string }> | undefined
-                                const className = codeEl?.props?.className ?? ''
-                                const lang = /language-(\S+)/.exec(className)?.[1] ?? 'text'
-                                return <CodeBlock language={lang}>{children}</CodeBlock>
-                              },
-                              code({ className, children, ...props }) {
-                                return <code className={className} {...props}>{children}</code>
-                              },
-                              table({ children, ...props }) {
-                                return (
-                                  <div className={styles.tableWrap}>
-                                    <table {...props}>{children}</table>
-                                  </div>
-                                )
-                              },
-                              a: MarkdownLink,
-                              img({ src, alt, ...props }) {
-                                return (
-                                  <button
-                                    type="button"
-                                    className={styles.researchImageBtn}
-                                    onClick={() => typeof src === 'string' && setViewerImage(src)}
-                                    aria-label={alt || 'Enlarge image'}
-                                  >
-                                    <img
-                                      src={src}
-                                      alt={alt}
-                                      loading="lazy"
-                                      className={styles.researchImage}
-                                      {...props}
-                                    />
-                                  </button>
-                                )
-                              },
-                              li({ children, ...props }) {
-                                const idea = listItemPlainText(children).trim()
-                                return (
-                                  <li {...props}>
-                                    {children}
-                                    {idea && (
-                                      <button
-                                        type="button"
-                                        className={styles.extendIdeaButton}
-                                        title="Ask the agent to expand on this idea"
-                                        disabled={thinking}
-                                        onClick={() => sendMessage(`Extend upon this idea: ${idea}`, messages, undefined, undefined, true)}
-                                      >
-                                        Expand ↗
-                                      </button>
-                                    )}
-                                  </li>
-                                )
-                              },
-                            }}
-                          >
-                            {normalizeInlineOrderedLists(text)}
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                            {normalizeInlineOrderedLists(splitNextSteps(text).body)}
                           </ReactMarkdown>
                         </div>
                       </>
                     )
                   })()
                 : <p className={styles.bubbleText}>{shownUserText(msg)}</p>
-            )}
-            {msg.role === 'assistant' && msg.durationSeconds !== undefined && msg.nextOptions && msg.nextOptions.length > 0 && (
-              <div className={styles.nextOptions} role="group" aria-label="Routes to explore next">
-                <span className={styles.nextOptionsLabel}>Where to next</span>
-                {msg.nextOptions.map(option => (
-                  <button
-                    key={option}
-                    type="button"
-                    className={styles.nextOptionBtn}
-                    disabled={thinking}
-                    onClick={() => sendMessage(option, messages, undefined, undefined, true)}
-                  >
-                    {option}
-                  </button>
-                ))}
-              </div>
             )}
             {msg.role === 'assistant' && (() => {
               const hasTrace = !!msg.trace && msg.trace.length > 0
@@ -1537,6 +1537,78 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
                 </>
               )
             })()}
+            {/* The reply's own closing "Next steps" section, if it wrote one:
+                after the case file bar, so all the next-step choices sit
+                together above Where to next. Part of the reply for exports
+                (markdownTailRefs). */}
+            {msg.role === 'assistant' && msg.content && (() => {
+              const nextSteps = splitNextSteps(extractJsonBlobs(extractMermaidDiagrams(msg.content).text).text).nextSteps
+              if (!nextSteps) return null
+              return (
+                <div
+                  className={`${styles.markdown} ${styles.replyNextSteps}`}
+                  ref={el => {
+                    if (el) markdownTailRefs.current.set(i, el)
+                    else markdownTailRefs.current.delete(i)
+                  }}
+                >
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                    {normalizeInlineOrderedLists(nextSteps)}
+                  </ReactMarkdown>
+                </div>
+              )
+            })()}
+            {msg.role === 'assistant' && msg.durationSeconds !== undefined && msg.nextOptions && msg.nextOptions.length > 0 && (
+              <div className={styles.nextOptions} role="group" aria-label="Routes to explore next">
+                <span className={styles.nextOptionsLabel}>Where to next</span>
+                {msg.nextOptions.map(option => (
+                  <button
+                    key={option}
+                    type="button"
+                    className={styles.nextOptionBtn}
+                    disabled={thinking}
+                    onClick={() => sendMessage(option, messages, undefined, undefined, true)}
+                  >
+                    {option}
+                  </button>
+                ))}
+                {/* Or a question of the user's own, on the latest answer
+                    only. Sent like the composer's (not a research turn). */}
+                {i === messages.length - 1 && (
+                  <form
+                    className={styles.askForm}
+                    onSubmit={e => {
+                      e.preventDefault()
+                      const text = askText.trim()
+                      if (!text || thinking) return
+                      setAskText('')
+                      sendMessage(text, messages)
+                    }}
+                  >
+                    <label className={styles.nextOptionsLabel} htmlFor={`ask-${i}`}>Or ask a question</label>
+                    <div className={styles.askRow}>
+                      <input
+                        id={`ask-${i}`}
+                        className={styles.askInput}
+                        value={askText}
+                        onChange={e => setAskText(e.target.value)}
+                        placeholder="Ask the agent anything…"
+                        disabled={thinking}
+                      />
+                      <button
+                        type="submit"
+                        className={styles.sendBtn}
+                        disabled={thinking || !askText.trim()}
+                        title="Ask"
+                        aria-label="Ask the agent"
+                      >
+                        <ToolbarIcon name="send" />
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            )}
             {msg.durationSeconds !== undefined && (
               <p className={styles.duration}>
                 {msg.toolCalls?.length

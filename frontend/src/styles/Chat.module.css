@@ -1447,7 +1447,51 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 0.3rem;
-  margin-top: 0.5rem;
+  margin-top: 1.25rem; /* a clear gap under the case file bar */
+}
+
+/* The reply's own "Next steps" section, shown under the case file bar. */
+.replyNextSteps {
+  margin-top: 1rem;
+}
+
+/* "Or ask a question" under the options: the same label, then an input
+   with the composer's send button. */
+.askForm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  width: 100%;
+  max-width: 36rem;
+  margin-top: 0.6rem;
+}
+
+.askRow {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.askInput {
+  flex: 1;
+  min-width: 0;
+  background: #ffffff;
+  border: 1px solid #ddd9cd;
+  border-radius: 999px;
+  color: #0d2c48;
+  font-family: 'Inter', sans-serif;
+  font-size: var(--font-size-sm);
+  padding: 0.45rem 0.75rem;
+  outline: none;
+}
+
+.askInput:focus {
+  border-color: var(--color-accent);
+}
+
+.askInput::placeholder {
+  color: #1f6f73;
+  font-size: var(--font-size-xs);
 }
 
 /* Same label as the recap popup's "Where to next" (FeedbackReportModal .sectionLabel). */
