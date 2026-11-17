@@ -145,15 +145,6 @@ def check_bootstrap(
         provider=provider, model=model,
     ))
 
-    names = {t.get("name") for t in tools}
-    has_save_output = "save_output" in names
-    results.append(_result(
-        "required_tool_present", "bootstrap", target_id, has_save_output,
-        "save_output tool is present" if has_save_output else "save_output tool is missing from the generated config",
-        "deterministic", severity="info" if has_save_output else "warning",
-        provider=provider, model=model,
-    ))
-
     shape_issues = []
     for t in tools:
         name = t.get("name", "?")
@@ -172,7 +163,7 @@ def check_bootstrap(
         provider=provider, model=model,
     ))
 
-    if tools and has_save_output and tool_syntax_passed and shape_passed:
+    if tools and tool_syntax_passed and shape_passed:
         tool_summary = "; ".join(
             f"{t.get('name')}: {t.get('description') or '(mcp tool)'}" for t in tools
         )

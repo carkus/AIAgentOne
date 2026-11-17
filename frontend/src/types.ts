@@ -331,6 +331,8 @@ export interface Deliverable {
 export interface RelicSuggestion {
   kind: RelicKind
   reason: string
+  // The user asked for this file; Chat builds it as soon as the reply lands.
+  requested?: boolean
 }
 
 export interface ModelAttempt {

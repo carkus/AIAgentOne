@@ -149,8 +149,8 @@ def bootstrap_prompt_block(spec: dict | None) -> str:
             )
     if not spec["allow_generated_tools"]:
         constraints.append(
-            'Do NOT write any tool with an `implementation` (no generated tools at all, '
-            'not even save_output). Only `"source": "mcp"` tools are allowed, or an empty '
+            'Do NOT write any tool with an `implementation` (no generated tools at all). '
+            'Only `"source": "mcp"` tools are allowed, or an empty '
             'tools array.'
         )
     if not spec["allow_delegation"]:

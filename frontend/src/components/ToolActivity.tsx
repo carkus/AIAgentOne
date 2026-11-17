@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import ReactMarkdown from 'react-markdown'
 import { MarkdownLink } from './VideoEmbed'
 import remarkGfm from 'remark-gfm'
@@ -571,7 +572,14 @@ function WorkerResultCard({ data }: { data: Record<string, unknown> }) {
 
 // ─── Saved file viewer ────────────────────────────────────────────────────────
 
-function SavedFileViewer({ filename }: { filename: string }) {
+// Every file a save_output-style tool reported saving in these calls.
+export function savedFilesIn(toolCalls: ToolCall[] | undefined): string[] {
+  const names = (toolCalls ?? []).map(tc => extractSavedFile(tc.result)).filter((f): f is string => !!f)
+  return [...new Set(names)]
+}
+
+// `inline` renders as a span so it can sit inside a reply's sentence.
+export function SavedFileViewer({ filename, inline = false }: { filename: string; inline?: boolean }) {
   const [content, setContent] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -583,16 +591,27 @@ function SavedFileViewer({ filename }: { filename: string }) {
     finally { setLoading(false) }
   }
 
+  const Outer = inline ? 'span' : 'div'
   return (
-    <div>
-      <div className={styles.savedFileRow}>
-        <span className={styles.savedFileIcon}>📄</span>
-        <button type="button" className={styles.savedFileBtn} onClick={open} disabled={loading}>
-          {loading ? 'Loading…' : filename}
-        </button>
-        {err && <span className={styles.savedFileErr}>{err}</span>}
-      </div>
-      {content !== null && (
+    <Outer>
+      {inline ? (
+        <>
+          <button type="button" className={styles.savedFileChip} onClick={open} disabled={loading} title="Open this file">
+            <span aria-hidden="true">📄</span>
+            {loading ? 'Loading…' : filename}
+          </button>
+          {err && <span className={styles.savedFileErr}> {err}</span>}
+        </>
+      ) : (
+        <div className={styles.savedFileRow}>
+          <span className={styles.savedFileIcon}>📄</span>
+          <button type="button" className={styles.savedFileBtn} onClick={open} disabled={loading} title="Open this file">
+            {loading ? 'Loading…' : filename}
+          </button>
+          {err && <span className={styles.savedFileErr}>{err}</span>}
+        </div>
+      )}
+      {content !== null && createPortal(
         <div className={styles.fileModal} onClick={() => setContent(null)}>
           <div className={styles.fileModalInner} onClick={e => e.stopPropagation()}>
             <div className={styles.fileModalHeader}>
@@ -604,9 +623,10 @@ function SavedFileViewer({ filename }: { filename: string }) {
             </div>
             <pre className={styles.fileModalContent}>{content}</pre>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
-    </div>
+    </Outer>
   )
 }
 

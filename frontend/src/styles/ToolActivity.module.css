@@ -1100,3 +1100,21 @@
   word-break: break-all;
   line-height: 1.4;
 }
+
+/* The saved-file button inside a reply: the Focus pill look, copied from
+   Chat's .headerChip (Setup's .behaviorIconBtn colours). */
+.savedFileChip {
+  align-items: center;
+  background: rgba(5, 55, 80, 0.06);
+  border: 1px solid rgba(5, 55, 80, 0.25);
+  border-radius: var(--radius-control);
+  color: rgba(5, 55, 80, 0.6);
+  display: inline-flex;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  text-transform: uppercase;
+  gap: 0.35rem;
+  cursor: pointer;
+  font-family: inherit;
+  vertical-align: middle;
+}

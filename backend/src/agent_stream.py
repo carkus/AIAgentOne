@@ -109,7 +109,13 @@ def _extract_relic_suggestions(content: str) -> tuple[str, list[dict]]:
             if kind not in RELIC_KINDS or any(s["kind"] == kind for s in suggestions):
                 continue
             reason = str(item.get("reason") or "").strip()[:160]
-            suggestions.append({"kind": kind, "reason": reason})
+            suggestion = {"kind": kind, "reason": reason}
+            # The user asked for this file: the frontend builds it at once.
+            if item.get("requested") is True:
+                suggestion["requested"] = True
+            suggestions.append(suggestion)
+    # A requested file is always kept, ahead of the optional suggestions.
+    suggestions.sort(key=lambda s: not s.get("requested"))
     return _RELIC_FENCE_RE.sub("", content).strip(), suggestions[:2]
 
 def _chosen_deliverables(agent_config: dict) -> list[dict]:
@@ -1339,9 +1345,12 @@ def _run_agent_stream(messages: list, agent_config: dict, allow_delegation: bool
     # A vetted server paused at its usage limit (Tavily's monthly credits) is
     # left out, including when bootstrap picked it, so the agent doesn't
     # spend rounds on a call that can only fail.
+    # A `save_output` tool from an agent built before exports replaced it
+    # is left out too: answers become files through rule 7b's relics.
     _agent_tools = [
         t for t in (agent_config.get("tools") or [])
         if not (t.get("source") == "mcp" and mcp_client.quota_exhausted(t.get("mcp_server") or ""))
+        and t.get("name") != "save_output"
     ]
     # Web search is whichever provider is usable now (Tavily, then Exa;
     # mcp_client.active_web_search), so a saved agent built while Tavily
@@ -1607,7 +1616,16 @@ clarifying question only belongs AFTER you've already produced real findings
    words, naming what the artifact would contain. Do NOT mention the block
    in your prose: the user sees it as a button, and nothing is built unless
    they click it. Skip it for short answers, greetings, follow-up
-   questions, or anything that reads fine as a chat message.{_deliverables_rule(agent_config)}
+   questions, or anything that reads fine as a chat message.
+
+   WHEN THE USER ASKS FOR A FILE ("save it", "export", "download", "give me
+   a template/document/spreadsheet/file"): you have no tool that saves
+   files, and you never need one. Write the full content in your reply
+   (the file is built from it), then add a ```relic block with the format
+   that fits best and "requested": true, e.g.
+   [{{"kind": "docx", "reason": "The resume template as an editable Word file", "requested": true}}].
+   That file is built for the user straight away. Never say you saved a
+   file, and never give a file path.{_deliverables_rule(agent_config)}
 
 7c. ALWAYS REPLY IN THE USER'S LANGUAGE: English unless the user writes in
    another language. Never switch language partway through, even when the

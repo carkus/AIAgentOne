@@ -75,7 +75,7 @@ Rules:
 - Do NOT generate an image-search or fetch-image tool — use the built-in `search_image` primitive instead
 - Do NOT generate an image-generation or image-creation tool — use the built-in `generate_image` primitive instead
 {jobsearch_rule}{search_rule}
-{save_output_rule}- Inside every `implementation` string, write Python string/dict literals with SINGLE quotes only (e.g. {{'status': 'saved'}}, not {{"status": "saved"}}). The `implementation` value itself is a double-quoted JSON string — an unescaped double quote inside your Python code ends that JSON string early and breaks the whole response. Single-quoting your Python avoids this entirely; it is not optional style, it is what keeps your own JSON valid.
+{save_output_rule}- Inside every `implementation` string, write Python string/dict literals with SINGLE quotes only (e.g. {{'status': 'ok'}}, not {{"status": "ok"}}). The `implementation` value itself is a double-quoted JSON string — an unescaped double quote inside your Python code ends that JSON string early and breaks the whole response. Single-quoting your Python avoids this entirely; it is not optional style, it is what keeps your own JSON valid.
 - The system_prompt you generate MUST instruct the agent that after all tool calls are done it must present the actual findings (facts, data, analysis) in its reply — not list tool names, not say "search complete"
 - Search/fetch tools MUST filter results for relevance: only include items where the search keyword appears in the title or description/snippet (case-insensitive). Discard unrelated results returned by the API.
 - Return ONLY valid JSON — no markdown fences, no explanation
@@ -188,7 +188,7 @@ def _json_correction_message(error: json.JSONDecodeError) -> str:
             "{\"status\": \"saved\"}, inside a JSON string that is itself "
             "double-quoted. Fix this by rewriting every Python string/dict literal "
             "inside every `implementation` value using single quotes only (e.g. "
-            "{'status': 'saved'}), so no unescaped double quote remains anywhere "
+            "{'status': 'ok'}), so no unescaped double quote remains anywhere "
             "inside a JSON string value."
         )
     return base
@@ -412,46 +412,19 @@ def _undefined_call_errors(
     return errors
 
 
-def _fake_save_output_errors(config: dict) -> list[tuple[str, _UndefinedCallError]]:
-    """The bootstrap prompt mandates a `save_output` tool that writes to disk
-    via open(os.path.join(TEMP_DIR, filename), 'w') before returning
-    {'status': 'saved', 'filename': ..., 'path': ...}. A live report
-    (`waterskier_findings.md` showing "Could not load file.") traced back to
-    a generated `save_output` implementation that built and returned that
-    success dict directly, with no open()/write() call anywhere — so the
-    tool reported success with a filename/path that GET /file/<filename>
-    then 404s on, since nothing was ever written to TEMP_DIR.
-
-    This is a distinct bug class from _forbidden_call_errors/
-    _local_endpoint_errors: those are guaranteed to raise at execution time
-    (NameError, connection refused), which is what makes them exec()-able and
-    therefore something a live traffic report would have surfaced as a
-    crash. A fabricated result dict never raises anything — the sandbox
-    happily execs code that skips the write and just returns the dict — so
-    it can only be caught structurally, at bootstrap time, before the fake
-    success is ever trusted. Same one-retry/then-drop treatment as the other
-    checks regardless."""
-    errors: list[tuple[str, _UndefinedCallError]] = []
-    for tool in config.get("tools", []):
-        if not isinstance(tool, dict) or tool.get("source") == "mcp":
-            continue
-        if tool.get("name") != "save_output":
-            continue
-        impl = tool.get("implementation")
-        if not isinstance(impl, str):
-            continue
-        if "open(" not in impl:
-            errors.append((
-                "save_output",
-                _UndefinedCallError(
-                    "implementation never calls open(...) to actually write a file — "
-                    "it must write via open(os.path.join(TEMP_DIR, filename), 'w') "
-                    "before setting result = {'status': 'saved', ...}, otherwise the "
-                    "reported filename/path doesn't exist and GET /file/<filename> "
-                    "will 404"
-                ),
-            ))
-    return errors
+def _drop_save_output_tools(config: dict) -> None:
+    """Removes any `save_output` tool the model wrote anyway. File output is
+    no longer a generated tool: an agent-written save_output wrote into the
+    server's temp folder, could report "saved" for an empty or "None" file
+    (seen live), and the file never reached the user's own machine. Answers
+    become files through exports instead (relic.py, rule 7b in
+    agent_stream.py). The prompt says not to write one; this makes it so."""
+    tools = config.get("tools")
+    if isinstance(tools, list):
+        config["tools"] = [
+            t for t in tools
+            if not (isinstance(t, dict) and t.get("name") == "save_output")
+        ]
 
 
 def _format_mcp_catalog(catalog: list[dict]) -> str:
@@ -703,13 +676,14 @@ def _build_prompt(
         "system_prompt, and tools you design, the same way a keyword would, "
         "rather than only acknowledging that an image exists.\n"
     ) if has_image else ""
-    # The spec can forbid generated tools outright, which would contradict an
-    # unconditional "always include save_output" rule — so it's conditional.
+    # No file-writing tool: answers become files through exports (relic.py),
+    # which the platform offers on every reply. _drop_save_output_tools
+    # removes one if the model writes it anyway.
     save_output_rule = (
-        "- Always include a `save_output` tool that writes a final result using "
-        "os.path.join(TEMP_DIR, filename); the tool must set result = {'status': "
-        "'saved', 'filename': filename, 'path': os.path.join(TEMP_DIR, filename)}\n"
-    ) if not spec or spec["allow_generated_tools"] else ""
+        "- Do NOT include a `save_output` tool or any other tool that writes "
+        "files. Turning an answer into a file (document, spreadsheet, report, "
+        "slides) is done by the platform's exports, outside your tools.\n"
+    )
     prompt = _BOOTSTRAP_PROMPT.format(
         purpose=purpose,
         spec_block=agent_spec.bootstrap_prompt_block(spec),
@@ -795,18 +769,17 @@ def generate_agent_config(
     # NameError the first time tools.py execs it — see _forbidden_call_errors);
     # valid-but-doomed Python that instead POSTs/GETs a hallucinated
     # 127.0.0.1/localhost "tool service" (guaranteed connection-refused — see
-    # _local_endpoint_errors); and a `save_output` tool that fabricates a
-    # {'status': 'saved', ...} result without ever calling open() to actually
-    # write the file (see _fake_save_output_errors).
+    # _local_endpoint_errors). Any `save_output` tool is dropped first
+    # (_drop_save_output_tools): file output goes through exports.
     forbidden_names = {"search_jobs", "fetch_page", "search_image", "generate_image"} | {
         c["tool_name"] for c in mcp_client.catalog_summary()
     }
+    _drop_save_output_tools(config)
     tool_errors = (
         _tool_syntax_errors(config)
         + _forbidden_call_errors(config, forbidden_names)
         + _undefined_call_errors(config, forbidden_names)
         + _local_endpoint_errors(config)
-        + _fake_save_output_errors(config)
     )
     if tool_errors:
         correction_response = create_chat_completion(
@@ -829,12 +802,12 @@ def generate_agent_config(
         retried_config, retry_error = _try_parse(text)
         if retried_config is not None:
             config = retried_config
+            _drop_save_output_tools(config)
             tool_errors = (
                 _tool_syntax_errors(config)
                 + _forbidden_call_errors(config, forbidden_names)
                 + _undefined_call_errors(config, forbidden_names)
                 + _local_endpoint_errors(config)
-                + _fake_save_output_errors(config)
             )
 
     if tool_errors:
@@ -1102,9 +1075,8 @@ def _generate_agent_config_stream(
     # _forbidden_call_errors for a generated tool calling a primitive/
     # vetted-MCP tool name as a bare function (valid Python, guaranteed
     # NameError at execution time), _local_endpoint_errors for the same
-    # bug via a hallucinated 127.0.0.1/localhost HTTP call instead, and
-    # _fake_save_output_errors for a save_output tool that fabricates a
-    # success result without ever writing the file.
+    # bug via a hallucinated 127.0.0.1/localhost HTTP call instead. Any
+    # `save_output` tool is dropped first (_drop_save_output_tools).
     forbidden_names = {"search_jobs", "fetch_page", "search_image", "generate_image"} | {
         c["tool_name"] for c in mcp_client.catalog_summary()
     }
@@ -1119,12 +1091,12 @@ def _generate_agent_config_stream(
             for t in config.get("tools", []) if isinstance(t, dict)
         ],
     }
+    _drop_save_output_tools(config)
     tool_errors = (
         _tool_syntax_errors(config)
         + _forbidden_call_errors(config, forbidden_names)
         + _undefined_call_errors(config, forbidden_names)
         + _local_endpoint_errors(config)
-        + _fake_save_output_errors(config)
     )
     report["code_checks"] = {"issues": _issue_list(tool_errors), "retried": bool(tool_errors)}
     if tool_errors:
@@ -1153,12 +1125,12 @@ def _generate_agent_config_stream(
             retried_config, _ = _try_parse(text)
             if retried_config is not None:
                 config = retried_config
+                _drop_save_output_tools(config)
                 tool_errors = (
                     _tool_syntax_errors(config)
                     + _forbidden_call_errors(config, forbidden_names)
                     + _undefined_call_errors(config, forbidden_names)
                     + _local_endpoint_errors(config)
-                    + _fake_save_output_errors(config)
                 )
         except Exception as e:
             yield _model_event(tool_fix_meta)
@@ -1250,12 +1222,12 @@ def validate_config(config: dict) -> tuple[dict, list[dict]]:
     forbidden_names = set(agent_spec.PRIMITIVE_NAMES) | {
         c["tool_name"] for c in mcp_client.catalog_summary()
     }
+    _drop_save_output_tools(config)
     for name, err in (
         _tool_syntax_errors(config)
         + _forbidden_call_errors(config, forbidden_names)
         + _undefined_call_errors(config, forbidden_names)
         + _local_endpoint_errors(config)
-        + _fake_save_output_errors(config)
     ):
         where = f" (line {err.lineno})" if err.lineno not in (None, "?") else ""
         errors.append({"tool": name, "message": f"{err.msg}{where}"})

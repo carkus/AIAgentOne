@@ -6,7 +6,7 @@ import { buildRelic, publishAgent, runAgent } from '../api'
 import { saveChat, setLastOpenedPointer } from '../chatStorage'
 import { buildChatPdf, type PdfAgentContext, type PdfMessage } from '../chatPdf'
 import { BEHAVIOR_TOGGLES, PERSONALITY_TRAITS } from '../agentTypes'
-import ToolActivity from './ToolActivity'
+import ToolActivity, { SavedFileViewer, savedFilesIn } from './ToolActivity'
 import GraphView from './GraphView'
 import CaseFile from './CaseFile'
 import AgentMakingReport from './AgentMakingReport'
@@ -61,6 +61,44 @@ function extractJsonBlobs(content: string): { text: string; blobs: unknown[] } {
 // like "**Next Steps:**" followed by the list) is split there, so the case
 // file bar can sit between the answer and its next steps.
 const NEXT_STEPS_RE = /^[ \t]*(?:#{1,6}[ \t]*)?(?:\*\*|__)?[ \t]*next steps?[ \t]*:?[ \t]*(?:\*\*|__)?[ \t]*:?[ \t]*$/gim
+// A saved file's path (or bare name) in a reply becomes a link the
+// Markdown renderer turns into a button that opens the file (GET /file/).
+// Also any local path the agent wrote itself (file:///…, C:\…\Temp\…,
+// /tmp/…): browsers won't open those from a web page.
+const SAVED_FILE_HREF = '#agent-file:'
+const MD_LINK_RE = /\[([^\]]*)\]\(([^)\s]+)\)/g
+const LOCAL_HREF_RE = /^(?:file:|[A-Za-z]:[\\/]|\/tmp\/)/i
+const LOCAL_PATH_RE = /`?(?:file:\/\/\/?)?(?:[A-Za-z]:[\\/]|\/tmp\/)(?:[^\s`()[\]<>"']*[\\/])?([^\s`()[\]<>"'\\/]+\.[A-Za-z0-9]{1,6})`?/g
+function fileLink(name: string): string {
+  return `[${name}](${SAVED_FILE_HREF}${encodeURIComponent(name)})`
+}
+function basename(path: string): string {
+  const last = path.split(/[\\/]/).pop() ?? path
+  try { return decodeURIComponent(last) } catch { return last }
+}
+function linkSavedFiles(text: string, files: string[]): string {
+  // Leave existing Markdown links alone, except ones to a local file.
+  const parts: string[] = []
+  let last = 0
+  for (const m of text.matchAll(MD_LINK_RE)) {
+    const at = m.index ?? 0
+    parts.push(linkPlain(text.slice(last, at), files))
+    parts.push(LOCAL_HREF_RE.test(m[2]) ? fileLink(basename(m[2])) : m[0])
+    last = at + m[0].length
+  }
+  parts.push(linkPlain(text.slice(last), files))
+  return parts.join('')
+}
+function linkPlain(text: string, files: string[]): string {
+  // Full local paths first (marked so the bare-name pass skips them).
+  let out = text.replace(LOCAL_PATH_RE, (_m, name: string) => '\u0000' + name + '\u0000')
+  for (const name of files) {
+    const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    out = out.replace(new RegExp('(?<![\\w.\\u0000])`?' + esc + '`?(?![\\w\\u0000]|\\.\\w)', 'g'), fileLink(name))
+  }
+  return out.replace(/\u0000([^\u0000]+)\u0000/g, (_m, name: string) => fileLink(name))
+}
+
 function splitNextSteps(text: string): { body: string; nextSteps: string | null } {
   let last = -1
   for (const m of text.matchAll(NEXT_STEPS_RE)) last = m.index ?? -1
@@ -1194,7 +1232,13 @@ export default function Chat({ agentConfig, agentName, onReset, onNewAgent, onBa
         </div>
       )
     },
-    a: MarkdownLink,
+    a(props) {
+      const href = props.href ?? ''
+      if (href.startsWith(SAVED_FILE_HREF)) {
+        return <SavedFileViewer inline filename={decodeURIComponent(href.slice(SAVED_FILE_HREF.length))} />
+      }
+      return <MarkdownLink {...props} />
+    },
     img({ src, alt, ...props }) {
       return (
         <button
@@ -1562,7 +1606,7 @@ export default function Chat({ agentConfig, agentName, onReset, onNewAgent, onBa
                           }}
                         >
                           <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                            {normalizeInlineOrderedLists(splitNextSteps(text).body)}
+                            {normalizeInlineOrderedLists(linkSavedFiles(splitNextSteps(text).body, savedFilesIn(msg.toolCalls)))}
                           </ReactMarkdown>
                         </div>
                       </>
