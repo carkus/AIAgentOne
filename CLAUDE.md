@@ -786,7 +786,8 @@ Internal-only work (refactors, tests, tooling, CLAUDE.md) gets no entry.
 `text` may use `**bold**` and `` `code` ``; the longer
 `problem`/`fix`/`result` form also works.
 
-**On deploy** (`deploy/redeploy.sh frontend` or `all`),
+**On deploy** (`frontend` or `all`, via `.\deploy.ps1` → `deploy\redeploy.ps1`
+or `deploy/redeploy.sh`; both scripts do the same steps),
 `tools/release-notes/release.py` runs first:
 
 - the highest kind decides the bump: `breaking` → major, `feature` → minor,

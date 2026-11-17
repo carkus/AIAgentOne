@@ -104,10 +104,33 @@ rm -rf /tmp/aiagent-dist
     Write-Host "Frontend redeployed."
 }
 
+# Same as redeploy.sh's release_version: works out the next version from
+# releaseNotes.json's `unreleased` entries (see CLAUDE.md, Versioning), so
+# the frontend build that follows carries it. Nothing unreleased: no bump.
+function Release-Version {
+    Write-Host "==> Versioning ..."
+    Push-Location $RepoRoot
+    try {
+        python tools/release-notes/release.py
+        if ($LASTEXITCODE -ne 0) { throw "release.py failed" }
+        python tools/release-notes/make_pdf.py
+        if ($LASTEXITCODE -ne 0) { Write-Host "(release notes PDF not built; the deploy goes on)" }
+    } finally {
+        Pop-Location
+    }
+}
+
+function Warn-UnreleasedBackendOnly {
+    $notes = Get-Content (Join-Path $RepoRoot "frontend/src/releaseNotes.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($notes.unreleased -and @($notes.unreleased).Count -gt 0) {
+        Write-Host "Note: unreleased changes stay unversioned until the next frontend or all deploy (the version shows in the frontend)."
+    }
+}
+
 switch ($Target) {
-    "backend"  { Deploy-Backend }
-    "frontend" { Deploy-Frontend }
-    "all"      { Deploy-Backend; Deploy-Frontend }
+    "backend"  { Deploy-Backend; Warn-UnreleasedBackendOnly }
+    "frontend" { Release-Version; Deploy-Frontend }
+    "all"      { Release-Version; Deploy-Backend; Deploy-Frontend }
 }
 
 Write-Host ""
