@@ -55,6 +55,91 @@
   min-width: 0;
 }
 
+/* The model and web search (Setup and Chat), at the right end of row 1:
+   a small card like Setup's location card (.locationMap). The two lines as a
+   column on the tinted panel, each on a white label, Settings on the white
+   strip to their right. */
+.modelPanel {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--graph-35);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+  background: var(--color-surface);
+}
+
+.modelPanelInfo {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 0.15rem;
+  min-width: 0;
+  min-height: 2.4rem;
+  padding: 0.3rem 0.6rem;
+  box-sizing: border-box;
+  background-color: var(--graph-10);
+}
+
+.modelPanel .metaItem {
+  padding: 0.05rem 0.6rem;
+  color: var(--graph-100);
+  font-size: var(--font-size-xs);
+  font-weight: 400;
+}
+
+/* A wrapper like Setup's top toolbars (Setup.module.css .topTools, same
+   values): the model panel + Settings, and Setup's location card + tickbox. */
+.toolbox {
+  gap: 0.3rem;
+  padding: 0.2rem;
+  background: #edf5f9;
+  border: 1px solid #b4d2df;
+  border-radius: var(--radius-control);
+}
+
+.toolbox > .btn {
+  width: auto;
+  min-width: 2rem;
+  height: 2rem;
+  border-color: #d9e9ef;
+  color: #3f7ea0;
+}
+
+.toolbox > .btn:hover:not(:disabled) {
+  background: #3f7ea0;
+  border-color: #3f7ea0;
+  color: #fff;
+}
+
+/* Inside the wrapper the panel is a white control like the toolbar buttons
+   (.topTools > button: white, #d9e9ef border, #3f7ea0 text). */
+.toolbox .modelPanel {
+  border-color: #d9e9ef;
+}
+
+.toolbox .modelPanelInfo {
+  min-height: 2rem;
+  background: var(--color-surface);
+}
+
+.toolbox .modelPanel .metaItem {
+  color: #3f7ea0;
+}
+
+/* Settings beside the model panel, and Setup's "Factor in location" tickbox
+   beside the location card: plain toolbar buttons (.btn), same size. */
+.btnSettings {
+  font-size: 2.9rem;
+  line-height: 0; /* the glyph is bigger than the button; keep the button's size */
+}
+
+/* A .btn that is a <label> (no :disabled of its own). */
+.btnDisabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
 /* One meta item (model, location, time, traits): plain text, no border. */
 .metaItem {
   display: inline-flex;

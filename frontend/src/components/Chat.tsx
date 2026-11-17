@@ -20,6 +20,7 @@ import { downloadRelic, RELIC_KINDS, RELIC_LABELS, relicFilename } from '../reli
 import ImageViewer from './ImageViewer'
 import FeedbackStatusBar from './FeedbackStatusBar'
 import WebSearchLabel from './WebSearchLabel'
+import ChatSettings from './ChatSettings'
 import type { AgentConfig, EvalResultItem, Relic, RelicKind, RelicSuggestion, ResultFeedback, SavedChat, SavedChatMessage, StreamEvent, TeamMember, ToolCall, TraceSpan } from '../types'
 import { describeModel, describeModelFallback, describeServedModel, formatModelInfo, lastServedModel, type ModelInfo } from '../modelLabel'
 import { normalizeInlineOrderedLists } from '../markdownFormat'
@@ -372,8 +373,13 @@ interface Props {
   chatId?: string
 }
 
-export default function Chat({ agentConfig, agentName, onReset, onNewAgent, onBackToSetup, initialMessages, chatId }: Props) {
+export default function Chat({ agentConfig: baseConfig, agentName, onReset, onNewAgent, onBackToSetup, initialMessages, chatId }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>(() => initialMessages ?? [])
+  // Settings changed on this page (ChatSettings): applied over the agent's
+  // config from the next turn on.
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [configOverrides, setConfigOverrides] = useState<Partial<AgentConfig>>({})
+  const agentConfig = useMemo(() => ({ ...baseConfig, ...configOverrides }), [baseConfig, configOverrides])
   // The job's workers: sent with every turn so the backend reuses them, and
   // replaced by the team each `done` event returns. Saved with the chat.
   const [team, setTeam] = useState<TeamMember[] | undefined>(agentConfig.team)
@@ -1348,12 +1354,26 @@ export default function Chat({ agentConfig, agentName, onReset, onNewAgent, onBa
             </div>
             {/* The model and web search, far right as on Setup. */}
             <div className={`${ah.meta} ${ah.metaRight}`}>
-              <span className={ah.metaStack}>
-                <span className={ah.metaItem} title={shownModelTitle}>
-                  <span aria-hidden="true">🧠</span> {shownModel}
+              <div className={`${ah.group} ${ah.toolbox}`}>
+              <div className={ah.modelPanel}>
+                <span className={ah.modelPanelInfo}>
+                  <span className={ah.metaItem} title={shownModelTitle}>
+                    {configuredModel}
+                  </span>
+                  <WebSearchLabel refresh={messages.length} />
                 </span>
-                <WebSearchLabel refresh={messages.length} />
-              </span>
+              </div>
+              <button
+                type="button"
+                className={`${ah.btn} ${ah.btnSettings}`}
+                onClick={() => setSettingsOpen(true)}
+                aria-haspopup="dialog"
+                aria-label="Settings"
+                title="Settings"
+              >
+                <span aria-hidden="true">⚙</span>
+              </button>
+              </div>
             </div>
           </div>
           <div className={ah.actions}>
@@ -1889,6 +1909,12 @@ export default function Chat({ agentConfig, agentName, onReset, onNewAgent, onBa
         )
       })()}
       {viewerImage && <ImageViewer src={viewerImage} onClose={() => setViewerImage(null)} />}
+      <ChatSettings
+        isOpen={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        agentConfig={agentConfig}
+        onApply={o => setConfigOverrides(prev => ({ ...prev, ...o }))}
+      />
     </div>
   )
 }

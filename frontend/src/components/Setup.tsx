@@ -1851,18 +1851,33 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
             <div className={ah.identity}>
               <h1 className={`${ah.name} ${styles.setupAgentName}`}>Agent {agentName}</h1>
               <div className={`${ah.meta} ${styles.setupModelMeta}`}>
-                <span className={ah.metaStack}>
+                {/* Model and web search, then Settings as its own toolbar button. */}
+                <div className={`${ah.group} ${ah.toolbox}`}>
+                <div className={ah.modelPanel}>
+                <span className={ah.modelPanelInfo}>
                   <button
                     type="button"
                     className={ah.metaItem}
                     onClick={ev => { ev.stopPropagation(); setSettingsOpen(true) }}
                     title={describeModelFallback(provider)}
                   >
-                    <span aria-hidden="true">🧠</span>
                     <span>{describeModel(provider, activeModel)}</span>
                   </button>
                   <WebSearchLabel />
                 </span>
+                </div>
+                <button
+                  type="button"
+                  className={`${ah.btn} ${ah.btnSettings}`}
+                  onClick={() => setSettingsOpen(true)}
+                  disabled={bootstrapping}
+                  aria-haspopup="dialog"
+                  aria-label="Settings"
+                  title="Settings"
+                >
+                  <span aria-hidden="true">⚙</span>
+                </button>
+                </div>
               </div>
             </div>
             <div className={ah.actions}>
@@ -2671,17 +2686,6 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                 <ToolsIcon />
               </button>
             )}
-            <button
-              type="button"
-              className={`${styles.toolbarIconBtn} ${styles.toolbarIsolated}`}
-              onClick={() => setSettingsOpen(true)}
-              disabled={bootstrapping}
-              aria-haspopup="dialog"
-              aria-label="Settings"
-              title="Settings"
-            >
-              <span className={styles.toolbarGlyph} aria-hidden="true">⚙</span>
-            </button>
             {/* Deploy ends the toolbar: everything for this agent in one bar. */}
             <button
               type="submit"

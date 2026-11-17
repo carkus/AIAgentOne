@@ -277,7 +277,12 @@
 }
 
 .workerLabel {
-  align-self: center;
+  /* Fills the row's height and centres its text, as .badge does, so it
+     lines up with the middle of the worker pills. */
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
   color: var(--color-accent);
   /* The agent name's face (AgentHeader .name), at label size. */
   margin-left: 0.2rem;
@@ -491,7 +496,7 @@
 }
 
 .markdown h3 {
-  color: #233240;
+  color: var(--color-accent);
   font-size: var(--chat-header-size);
   font-weight: 700;
   margin: 0.9rem 0 0.3rem;
