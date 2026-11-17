@@ -25,6 +25,16 @@
       "kind": "fix",
       "title": "Case file before the reply's Next steps",
       "text": "When a reply ends with its own **Next steps** list, the Case file and export bar now sits above that list, so all the follow-up choices are together at the bottom."
+    },
+    {
+      "kind": "fix",
+      "title": "One name for the agent",
+      "text": "\"How this agent was made\" now gives the agent the same name as the header, instead of a second name the model made up. Agents built before this keep their old name there until they are rebuilt."
+    },
+    {
+      "kind": "fix",
+      "title": "Agents always show their web search",
+      "text": "If a General or Research agent's design comes back with no way to look things up, web search is now added when it's built, so it shows in the tool row and in \"How this agent was made\". The agent could already search while running; it just didn't show."
     }
   ],
   "releases": [

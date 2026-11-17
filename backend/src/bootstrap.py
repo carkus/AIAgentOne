@@ -858,9 +858,35 @@ def generate_agent_config(
     # MCP-tool entry in place instead of creating a duplicate.
     config["agent_config_id"] = uuid.uuid4().hex
     agent_spec.enforce_on_config(config, spec)
+    _ensure_web_search(config, agent_type, spec)
     if not agent_spec.restricts_tools(spec):
         bootstrap_memory.record(purpose, config, provider, is_worker, agent_type=agent_type)
     return config, fewshot_count
+
+
+def _ensure_web_search(config: dict, agent_type: str | None, spec: dict | None) -> dict | None:
+    """A General/Research agent whose design has no web search gets the
+    active provider's (Tavily, then Exa) added here, in code. agent_stream.py
+    already adds it at run time, but only there, so the built config, the
+    header's tool row, "How this agent was made" and the self-check all saw
+    an agent with no way to look anything up. Same conditions as the run-time
+    rule, including an Advanced Setup allow-list. Workers inherit nothing
+    here: their own bootstrap passes agent_type too. Returns {label, tool}
+    when it added the tool, else None."""
+    if agent_type not in ("general", "research"):
+        return None
+    tools = config.setdefault("tools", [])
+    if any(t.get("source") == "mcp" and mcp_client.web_search_provider(t.get("mcp_server"), t.get("mcp_tool"))
+           for t in tools):
+        return None
+    web = mcp_client.active_web_search()
+    if not web or any(t.get("name") == web["tool"] for t in tools):
+        return None
+    ref = {"source": "mcp", "mcp_server": web["server_id"], "mcp_tool": web["tool"]}
+    if not agent_spec.tool_def_allowed(ref, spec):
+        return None
+    tools.append({**ref, "name": web["tool"], "description": web["description"], "input_schema": web["input_schema"]})
+    return {"label": web["label"], "tool": web["tool"]}
 
 
 _TOOL_NAME_RE = re.compile(r'"name"\s*:\s*"([^"]+)"')
@@ -1163,6 +1189,10 @@ def _generate_agent_config_stream(
     for note in agent_spec.enforce_on_config(config, spec):
         report["spec_notes"].append(note)
         yield {"type": "status", "message": note, "stage": "checks"}
+    added_search = _ensure_web_search(config, agent_type, spec)
+    if added_search:
+        report["added_web_search"] = added_search
+        yield {"type": "status", "message": f"Added web search ({added_search['label']}): the design gave the agent no way to look things up", "stage": "checks"}
 
     yield {"type": "status", "message": "Running self-checks…", "stage": "selfcheck"}
     report["self_checks"] = []

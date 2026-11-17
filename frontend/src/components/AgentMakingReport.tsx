@@ -60,7 +60,7 @@ export default function AgentMakingReport({ config }: Props) {
   const mcpDropped = r?.mcp_dropped ?? []
   const proposed = r?.design?.tools ?? []
   const finalNames = new Set(tools.map(t => t.name))
-  const repairsNeeded = !!r?.json_fix || (checks?.issues.length ?? 0) > 0 || mcpDropped.length > 0
+  const repairsNeeded = !!r?.json_fix || (checks?.issues.length ?? 0) > 0 || mcpDropped.length > 0 || !!r?.added_web_search
   const selfChecks = r?.self_checks ?? []
 
   let step = 0
@@ -157,6 +157,13 @@ export default function AgentMakingReport({ config }: Props) {
               <p>
                 Dropped MCP tool references that don’t exist in the vetted catalog:{' '}
                 {mcpDropped.map(d => <code key={d} className={styles.inlineCode}>{d}</code>)}
+              </p>
+            )}
+            {r.added_web_search && (
+              <p>
+                The design gave the agent no way to look things up, so code added web search
+                ({r.added_web_search.label}):{' '}
+                <code className={styles.inlineCode}>{r.added_web_search.tool}</code>
               </p>
             )}
             {(r.spec_notes ?? []).length > 0 && (

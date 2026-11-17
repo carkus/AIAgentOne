@@ -20,6 +20,9 @@ Env vars:
   RATE_LIMIT_PER_DAY    - sustained cap per client IP (default 50)
   BRIEF_RATE_LIMIT_PER_MINUTE / BRIEF_RATE_LIMIT_PER_DAY - the "brief" bucket
                           (defaults 20 / 300), see check()'s `bucket`
+  RATE_LIMIT_DISABLED   - "1" turns the limiter off entirely. For local dev
+                          (env.json), where every request comes from one IP
+                          and the limit protects nothing; never set on the droplet.
 """
 import os
 import time
@@ -48,6 +51,8 @@ def check(client_id: str, bucket: str = "default") -> str | None:
     `bucket` picks a separately counted budget (_BUCKETS); hits are stored
     under "<bucket>:<client>" for non-default buckets, so no schema change.
     """
+    if os.environ.get("RATE_LIMIT_DISABLED") == "1":
+        return None
     per_minute, per_day = _BUCKETS[bucket]
     if bucket != "default":
         client_id = f"{bucket}:{client_id}"

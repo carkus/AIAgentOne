@@ -82,6 +82,9 @@ export interface BootstrapReport {
   code_checks?: { issues: BootstrapIssue[]; retried: boolean; remaining?: BootstrapIssue[]; dropped?: string[] };
   mcp_dropped?: string[];
   spec_notes?: string[];
+  // Set when code added web search because the design gave a
+  // General/Research agent none (bootstrap._ensure_web_search).
+  added_web_search?: { label: string; tool: string };
   self_checks?: { check?: string; passed?: boolean; severity?: string; reason?: string }[];
   memory?: 'recorded' | 'skipped_restricted';
 }

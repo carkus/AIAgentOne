@@ -1624,7 +1624,9 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
         agentType,
         controller.signal,
         purposeImage,
-        DEFAULT_AGENT_SPEC,
+        // The persona takes the name shown in the header, so "How this agent
+        // was made" doesn't introduce the agent under a second, invented name.
+        { ...DEFAULT_AGENT_SPEC, persona_name: agentName.trim().slice(0, 40) },
       )
       const built: AgentConfig = {
         ...config,
