@@ -1,0 +1,359 @@
+{
+  "_about": "Changes since the last deploy go in \"unreleased\", each tagged kind fix/feature/breaking. On deploy, tools/release-notes/release.py turns them into the next release (newest first) and sets the version. See CLAUDE.md, Versioning.",
+  "unreleased": [
+    {
+      "kind": "fix",
+      "title": "Brief questions stand out",
+      "text": "When the brief needs to ask you something, Setup opens the Brief step, and the Brief box in the build graph turns the same colour as the question."
+    },
+    {
+      "kind": "fix",
+      "title": "Model on the right in the deployment header",
+      "text": "On the deployment page the model and web search line now sit at the far right of the header, as they do on Setup."
+    }
+  ],
+  "releases": [
+    {
+      "version": "0.9.0",
+      "date": "17 November 2026",
+      "title": "What we fixed, and the AI behind it",
+      "subtitle": "Agent One · 187 commits, 20 September to 17 November 2026",
+      "intro": "Agent One builds an agent from a plain-language goal. A model writes the agent's system prompt, picks or writes its tools, and the agent then runs a tool loop with a team of worker agents. Most of the hard problems were not in the idea but in making it **fast, cheap and dependable**: models that wrote broken tool code, a cloud model that was too slow to use, free quotas that ran out mid-session, and services that hung or silently failed. This page lists the main fixes, then the AI services the app uses and why each one is there.",
+      "headline": {
+        "title": "The biggest single change: the model",
+        "text": "Up to 17 November the default model was Cloudflare's **Qwen 3.8 27B**. It gave good answers but spent about 1,000 hidden reasoning tokens on every call, even at low reasoning effort. Switching the default to **Qwen3 30B-A3B** (a mixture-of-experts model that only uses about 3B parameters per token) is the main reason the app now feels so much faster.",
+        "columns": [
+          "Measure",
+          "Qwen 3.8 27B (before)",
+          "Qwen3 30B-A3B (now)",
+          "Change"
+        ],
+        "rows": [
+          [
+            "One model call",
+            "26-52 s",
+            "3-5 s",
+            "about 10x faster"
+          ],
+          [
+            "Full staged brief in Setup",
+            "about 190 s",
+            "about 16 s",
+            "about 12x faster"
+          ],
+          [
+            "Reasoning tokens per call",
+            "about 1,000, hidden",
+            "none by default",
+            "less paid output"
+          ]
+        ]
+      },
+      "fixesTitle": "Part 1 · The main fixes",
+      "fixesNote": "Grouped by the kind of problem. Older fixes first within each group.",
+      "groups": [
+        {
+          "title": "A. Speed, cost and keeping a model available",
+          "fixes": [
+            {
+              "title": "Paid API costs on day one",
+              "problem": "Early development ran against paid cloud models, so every test cost money.",
+              "fix": "Switched development to a local model (Ollama on the desktop GPU) and kept cloud models optional.",
+              "result": "Unlimited free testing; the local model is still the last fallback today."
+            },
+            {
+              "title": "Gemini credits ran out",
+              "problem": "Gemini's prepaid credits were used up and every call returned 402.",
+              "fix": "A 402 now makes the app skip Gemini for 15 minutes instead of failing every request. Gemini became optional and Cloudflare Workers AI the main provider.",
+              "result": "Requests go straight to a provider that works."
+            },
+            {
+              "title": "Cloudflare free quota lasted a few hours",
+              "problem": "Workers AI's free 10,000 neurons a day ran out within hours of real use (error 4006), and the error detection missed it because the code was not reading the response body.",
+              "fix": "Fixed the 4006 detection; on that error the app skips Workers AI until 00:00 UTC. Then moved the account to Workers Paid, so usage past the free allowance is billed, not refused.",
+              "result": "No more mid-session outages from the daily limit."
+            },
+            {
+              "title": "One failing provider failed the whole request",
+              "problem": "If the chosen model failed, the user saw an error even when another provider was up.",
+              "fix": "A fallback cascade in `llm_client.py`: Gemini, then Workers AI, then local Ollama. An agent set to a free provider never falls back to paid Gemini.",
+              "result": "A request succeeds as long as any allowed provider is reachable."
+            },
+            {
+              "title": "The live site failed when local worked",
+              "problem": "Production returned errors while local dev was fine: the droplet's `.env` never had the Cloudflare keys, only the local `env.json` did.",
+              "fix": "Added the keys on the droplet; the deploy script now treats them as required.",
+              "result": "Production and local run the same providers."
+            },
+            {
+              "title": "Too slow to use",
+              "problem": "Qwen 3.8 27B took 26-52 s a call; a brief took about 3 minutes.",
+              "fix": "Measured both hosted models and made Qwen3 30B-A3B the default everywhere, including a one-time move for browsers that had the old default saved.",
+              "result": "3-5 s a call, 16 s a brief (see the table above)."
+            },
+            {
+              "title": "Workers ran one after another",
+              "problem": "A turn with several worker agents ran them in sequence, so three workers took three times as long.",
+              "fix": "Workers now run in parallel threads and each result streams back as soon as it finishes. Each tool call got a `call_index` so results attach to the right card. On the single local GPU workers still run one at a time, since Ollama would only queue them.",
+              "result": "A team costs about as long as its slowest worker."
+            },
+            {
+              "title": "Tool servers that hung or kept failing",
+              "problem": "An MCP tool server that did not answer could hang a request, and a broken one was retried on every bootstrap.",
+              "fix": "Calls have a hard timeout, and a failed server is cached as down for 5 minutes.",
+              "result": "A bad tool server costs a few seconds once, not every time."
+            }
+          ]
+        },
+        {
+          "title": "B. Making generated agents actually work",
+          "fixes": [
+            {
+              "title": "The agent did not perform requests",
+              "problem": "Early on the agent loop described tool calls instead of making them, so nothing was fetched.",
+              "fix": "Fixed the streaming loop so tool calls are executed and their results fed back to the model.",
+              "result": "The foundation for everything else."
+            },
+            {
+              "title": "Generated tools calling functions that do not exist",
+              "problem": "The model wrote tool code that called `tavily_search()`, `tools.search_image()`, invented helpers like `tas_search()`, or a made-up localhost proxy. It compiled, then crashed the first time the tool ran.",
+              "fix": "Three code checks run after every bootstrap: a forbidden-name scan (built-in and MCP tool names), a local-endpoint scan, and an AST check that flags any call to a name the sandbox does not provide. A failing tool gets one retry with the error, then is dropped.",
+              "result": "Broken tools are caught at build time, not in front of the user."
+            },
+            {
+              "title": "Bootstrap JSON that would not parse",
+              "problem": "Bootstrap often failed with “Expecting ',' delimiter”. The cause was the prompt itself: its example showed a double-quoted Python dict, which the model copied into a JSON string.",
+              "fix": "Fixed the example and added a rule to single-quote strings inside tool code. The one retry now gets a hint specific to this error. A blind repair was tried and rejected as unsafe.",
+              "result": "The prompt no longer teaches the model to break its own output."
+            },
+            {
+              "title": "No team, or a team the model ignored",
+              "problem": "Asked about several topics, the main agent did everything itself, so no workers were used.",
+              "fix": "The delegation rule went from optional to a must, with code that sends the reply back once if a research turn used fewer than two workers or skipped the report.",
+              "result": "Research turns reliably use a team and a written synthesis."
+            },
+            {
+              "title": "Turns that only posted a plan",
+              "problem": "A turn sometimes drew its plan diagram and stopped without doing the work.",
+              "fix": "Such a turn is sent back once to carry the plan out, and the prompt says so.",
+              "result": "Plans are followed through in the same turn."
+            },
+            {
+              "title": "Answers drifting out of scope",
+              "problem": "Out-of-scope rules in the prompt can be paraphrased away or argued around.",
+              "fix": "A separate judge model screens each final reply against the out-of-scope list; one regenerate, then a fixed, code-written decline.",
+              "result": "A guarded agent cannot be talked into a forbidden topic as easily."
+            }
+          ]
+        },
+        {
+          "title": "C. Web search",
+          "fixes": [
+            {
+              "title": "No way to search the web",
+              "problem": "Agents could only fetch a known URL or search job listings.",
+              "fix": "Added Tavily's official remote MCP server as a vetted tool, and gave the Setup brief a quick search so a bare name like “augustus” can be placed instead of asked about.",
+              "result": "Agents and the brief work from current information."
+            },
+            {
+              "title": "Tavily's monthly credits ran out",
+              "problem": "When Tavily hit its usage limit, every search failed for the rest of the month.",
+              "fix": "A server that reports a usage limit is paused for an hour (a rate limit for 60 s) and left out of the tool list. Exa's free remote MCP server was added as the fallback (no key or card needed), and a search that hits a limit mid-turn is re-run on the next provider. Brief searches are cached for 24 h. Setup and Chat show which search is in use.",
+              "result": "Search keeps working, at no extra cost."
+            }
+          ]
+        },
+        {
+          "title": "D. Infrastructure and safety",
+          "fixes": [
+            {
+              "title": "29-second request limit",
+              "problem": "The first deployment design (AWS Lambda behind API Gateway) cut every request off at 29 s, shorter than a real agent run.",
+              "fix": "Deployed as a Flask app under gunicorn and nginx on a droplet instead, with a 300 s timeout and streaming turned on end to end.",
+              "result": "Long agent runs finish and stream their progress live."
+            },
+            {
+              "title": "Stores that broke with more than one process",
+              "problem": "Server-side data lived in JSON files that two processes (the web app and the MCP server) could overwrite at the same time.",
+              "fix": "Moved every store to one SQLite database in WAL mode with locked write transactions; old JSON files are imported once.",
+              "result": "Safe concurrent writes, including rate-limit counters."
+            },
+            {
+              "title": "Generated code running inside the server",
+              "problem": "Tool code written by the model ran with `exec()` in the server process, next to the API keys.",
+              "fix": "Each call now runs in a fresh child process with no secrets in its environment, a 30 s kill, CPU and memory limits, no network unless the code uses it, and an import allowlist.",
+              "result": "A misbehaving tool cannot read the keys or hang the server."
+            },
+            {
+              "title": "A tiny droplet under memory pressure",
+              "problem": "The 1 GB droplet was swapping.",
+              "fix": "One gunicorn worker with 16 threads instead of several worker processes.",
+              "result": "Up to 16 agents at once in about 90 MB."
+            },
+            {
+              "title": "Old dev servers answering instead of new code",
+              "problem": "A change seemed not to work because three local backends were listening on the same port and an old one kept answering.",
+              "fix": "Stopped the stale processes; worth checking first whenever a fix appears to do nothing."
+            }
+          ]
+        },
+        {
+          "title": "E. Seeing what the agent does",
+          "fixes": [
+            {
+              "title": "Long silences with only a spinner",
+              "problem": "Model calls, retries and self-checks took real time with nothing on screen.",
+              "fix": "The loop streams status events with a title and reason, and every model call, tool call and worker is timed into a Case file waterfall and a live process graph.",
+              "result": "The user can see what is happening and where the time goes."
+            }
+          ]
+        }
+      ],
+      "servicesTitle": "Part 2 · The AI services we use, and why",
+      "servicesIntro": "Agent One uses several kinds of AI service, each for a different job. The rule throughout is: use the cheapest service that does the job well, always have a free fallback, and never advertise a service that is not configured.",
+      "services": [
+        {
+          "title": "Language models (the agent's brain)",
+          "columns": [
+            "Service",
+            "Model",
+            "What it does here",
+            "Why"
+          ],
+          "rows": [
+            [
+              "Cloudflare Workers AI",
+              "Qwen3 30B-A3B (default), Qwen 3.8 27B (offered)",
+              "Main model: designs agents, runs the agent loop, workers, briefs and judges.",
+              "Fast (3-5 s a call), runs from the droplet, cheap on the paid plan ($0.011 per 1,000 neurons past the free allowance)."
+            ],
+            [
+              "Ollama (local)",
+              "qwen3:8b",
+              "Free fallback and local development on the RTX 2070 SUPER.",
+              "No cost and no quota. Slower, one request at a time, so it is the last resort. Not on the droplet."
+            ],
+            [
+              "Google Gemini",
+              "gemini-3.6-flash",
+              "Optional first choice when it has credits; also image generation and embeddings.",
+              "Strong and fast, but prepaid credits ran out, so the app skips it on 402 and does not depend on it."
+            ]
+          ]
+        },
+        {
+          "title": "Embeddings (meaning as numbers)",
+          "columns": [
+            "Service",
+            "Model",
+            "What it does here",
+            "Why"
+          ],
+          "rows": [
+            [
+              "Gemini or Ollama",
+              "gemini-embedding-2-preview, nomic-embed-text",
+              "Finds similar past agents to use as examples when building a new one (retrieval-augmented generation), and spots duplicate or related Focus topics in Setup.",
+              "Grounds the design in agents that worked before instead of starting cold. Fails quietly to “no grounding”."
+            ]
+          ]
+        },
+        {
+          "title": "Tool servers over MCP (the agent's hands)",
+          "columns": [
+            "Service",
+            "Type",
+            "What it does here",
+            "Why"
+          ],
+          "rows": [
+            [
+              "mcp-server-time, mcp-server-fetch",
+              "Local, stdio (official reference servers)",
+              "Current time and time zones; reading a web page.",
+              "Vetted, free and reliable, so the model does not write its own versions."
+            ],
+            [
+              "Tavily",
+              "Remote MCP, API key",
+              "First-choice web search.",
+              "Good results, built for agents; limited monthly credits."
+            ],
+            [
+              "Exa",
+              "Remote MCP, free, no key",
+              "Fallback web search when Tavily is at its limit.",
+              "Free with no card; keeps search working all month."
+            ],
+            [
+              "Agent One itself",
+              "MCP server (own process)",
+              "Publishes a chosen agent as a tool other apps (Claude Desktop, Claude Code, jobfit) can call.",
+              "Makes Agent One a building block, not only a website."
+            ]
+          ]
+        },
+        {
+          "title": "Images",
+          "columns": [
+            "Service",
+            "Type",
+            "What it does here",
+            "Why"
+          ],
+          "rows": [
+            [
+              "Gemini, then Hugging Face",
+              "Image generation",
+              "Creates images an agent is asked for.",
+              "Hugging Face is free, so images still work without Gemini credits."
+            ],
+            [
+              "Tavily, then Wikipedia",
+              "Image search",
+              "Finds real photos for a topic.",
+              "Wikipedia is free and always available."
+            ]
+          ]
+        },
+        {
+          "title": "Quality control (AI checking AI)",
+          "columns": [
+            "Piece",
+            "Type",
+            "What it does here",
+            "Why"
+          ],
+          "rows": [
+            [
+              "Self-checks",
+              "LLM-as-judge plus code checks",
+              "Grades each bootstrap, reply, tool call and worker.",
+              "Catches weak answers and gives every model a track record."
+            ],
+            [
+              "Scope guard",
+              "Separate judge call",
+              "Screens replies against the out-of-scope list.",
+              "A judge with no tools or persona is much harder to talk round."
+            ],
+            [
+              "UCB1 bandit",
+              "Reinforcement learning",
+              "Recommends a model from that track record, while still trying new ones.",
+              "Model choice based on data, not guesses. Advisory only."
+            ],
+            [
+              "Eval harness",
+              "Offline testing",
+              "Runs fixed cases against each model with recorded tool replies.",
+              "Fair, repeatable comparisons between models."
+            ]
+          ]
+        }
+      ],
+      "closingTitle": "Where it stands",
+      "closing": "Agent One now runs on a fast, low-cost hosted model with a free local fallback, two web search providers that cover for each other, generated tools that are checked before they run and sandboxed when they do, and a record of every step the agent takes. Remaining known limits are listed in `CLAUDE.md`: per-user accounts, server-side chat history, durable file output, and a stricter sandbox (separate user or container, network allowlist)."
+    }
+  ]
+}

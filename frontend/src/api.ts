@@ -472,6 +472,23 @@ export async function fetchModelInfo(): Promise<{
   }
 }
 
+/** The web search agents use right now (Tavily, or Exa while Tavily is
+ * unavailable) and any provider paused at its limit. `active` is null when
+ * there's no web search; the whole result is null when the request failed. */
+export async function fetchWebSearchStatus(): Promise<{ active: string | null; paused: string[] } | null> {
+  try {
+    const res = await fetch(`${API_URL}/models/web-search`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return {
+      active: typeof data.active === 'string' ? data.active : null,
+      paused: Array.isArray(data.paused) ? data.paused : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchFile(filename: string): Promise<string> {
   const res = await fetch(`${API_URL}/file/${encodeURIComponent(filename)}`);
   if (!res.ok) throw new Error('File not found');

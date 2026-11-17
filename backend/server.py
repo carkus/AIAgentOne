@@ -138,6 +138,21 @@ def models():
     })
 
 
+@app.route("/models/web-search", methods=["GET", "OPTIONS"])
+def web_search_status():
+    """The web search agents use right now (Tavily, or Exa while Tavily is
+    unavailable) and any provider paused at its limit, for the line under
+    the model in the UI. Under /models so the existing proxies cover it."""
+    if request.method == "OPTIONS":
+        return "", 204
+    try:
+        import mcp_client
+        return jsonify(mcp_client.web_search_status())
+    except Exception as e:
+        app.logger.info("web search status unavailable: %s", e)
+        return jsonify({"active": None, "paused": []})
+
+
 @app.route("/brief", methods=["POST", "OPTIONS"])
 def brief():
     if request.method == "OPTIONS":

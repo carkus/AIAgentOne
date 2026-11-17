@@ -28,7 +28,8 @@ Two transport kinds now, both handled by mcp_client.py's `_session_cm`:
   to avoid adding a Node/npx runtime to a droplet that has only ever run
   Python. The community-maintained pip wrapper that used to exist for
   Tavily (`mcp-tavily`) is archived/deprecated in favor of this official
-  remote server, so it was never installed here.
+  remote server, so it was never installed here. Exa's official remote
+  server ("exa") is the second web search, used while Tavily is unavailable.
 """
 import os
 import sys
@@ -64,3 +65,33 @@ if _tavily_key:
             "already have."
         ),
     }
+
+# Exa's official remote MCP server (https://docs.exa.ai/reference/exa-mcp),
+# the fallback web search when Tavily is missing or paused at its monthly
+# limit. Always registered: without EXA_API_KEY it uses Exa's keyless
+# endpoint (free, rate-limited); with one (free tier, no card) it uses that
+# account's monthly credits. Only its search tool is listed: page reading
+# stays with fetch_page / the fetch server, so it doesn't spend Exa calls.
+_exa_key = os.environ.get("EXA_API_KEY")
+MCP_SERVERS["exa"] = {
+    "transport": "http",
+    "url": "https://mcp.exa.ai/mcp" + (f"?exaApiKey={_exa_key}" if _exa_key else ""),
+    "tools": ["web_search_exa"],
+    "description": "Exa's official remote MCP server for general web search (fallback after Tavily).",
+}
+
+# Web search providers in order of preference. mcp_client.active_web_search()
+# picks the first that's registered, reachable and not paused at its usage
+# limit; agents, bootstrap and the brief all use that one. `args` maps a
+# query and result count onto the tool's own input names.
+WEB_SEARCH_PROVIDERS = [
+    {
+        "server_id": "search", "tool": "tavily_search", "label": "Tavily",
+        "args": lambda q, n: {"query": q, "max_results": n, "search_depth": "basic"},
+    },
+    {
+        "server_id": "exa", "tool": "web_search_exa",
+        "label": "Exa" if _exa_key else "Exa (keyless)",
+        "args": lambda q, n: {"query": q, "numResults": n},
+    },
+]

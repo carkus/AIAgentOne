@@ -7,8 +7,8 @@
 #
 # Usage:
 #   deploy/redeploy.sh backend    # sync backend/src + requirements, restart the service
-#   deploy/redeploy.sh frontend   # npm run build locally, ship dist/, fix ownership
-#   deploy/redeploy.sh all        # both
+#   deploy/redeploy.sh frontend   # version the release, npm run build locally, ship dist/, fix ownership
+#   deploy/redeploy.sh all        # version the release, then both
 #
 # Run from the repo root (paths below are relative to it).
 
@@ -60,10 +60,26 @@ deploy_frontend() {
     echo "Frontend redeployed."
 }
 
+# Version the release before building: release.py turns the Unreleased
+# changes in frontend/src/releaseNotes.json into the next version (from their
+# fix/feature/breaking tags) and writes it into package.json, so the built
+# frontend shows it. No unreleased changes: no bump. See CLAUDE.md, Versioning.
+release_version() {
+    echo "==> Versioning ..."
+    python tools/release-notes/release.py
+    python tools/release-notes/make_pdf.py || echo "(release notes PDF not built; the deploy goes on)"
+}
+
+warn_unreleased_backend_only() {
+    if python -c "import json,sys; sys.exit(0 if json.load(open('frontend/src/releaseNotes.json',encoding='utf-8')).get('unreleased') else 1)"; then
+        echo "Note: unreleased changes stay unversioned until the next frontend or all deploy (the version shows in the frontend)."
+    fi
+}
+
 case "${1:-}" in
-    backend)  deploy_backend ;;
-    frontend) deploy_frontend ;;
-    all)      deploy_backend; deploy_frontend ;;
+    backend)  deploy_backend; warn_unreleased_backend_only ;;
+    frontend) release_version; deploy_frontend ;;
+    all)      release_version; deploy_backend; deploy_frontend ;;
     *)
         echo "Usage: $0 {backend|frontend|all}" >&2
         exit 1

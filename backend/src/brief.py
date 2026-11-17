@@ -492,31 +492,56 @@ Web search results for the focus topics, for background on what they refer to. T
 """
 
 
+# Topic set -> (monotonic time, prompt block). The brief re-runs whenever a
+# step changes (an answer, a trait, a behaviour), but its web search depends
+# only on the topics, so the same set (any order or case) reuses the last
+# result instead of spending another Tavily credit. Successes only.
+_web_cache: dict[tuple[str, ...], tuple[float, str]] = {}
+_WEB_CACHE_SECONDS = 24 * 3600
+_WEB_CACHE_MAX = 200
+
+
+def _web_cache_key(keywords: list[str]) -> tuple[str, ...]:
+    return tuple(sorted({" ".join(str(k).lower().split()) for k in keywords} - {""}))
+
+
+def _search_available() -> bool:
+    try:
+        import mcp_client
+        return mcp_client.active_web_search() is not None
+    except Exception:
+        return False
+
+
 def _web_context(keywords: list[str]) -> tuple[str | None, int]:
-    """One quick Tavily search over the focus topics, via the vetted MCP
-    server, as background for the "read" and "focus" stages. Returns the
+    """One quick web search over the focus topics (Tavily, or Exa when
+    Tavily is unavailable; mcp_client.web_search), as background for the "read" and "focus" stages. Returns the
     prompt block (None if search is unavailable or failed) and the time
     taken. Never raises: the brief goes ahead without it."""
     t0 = time.monotonic()
+    key = _web_cache_key(keywords)
+    cached = _web_cache.get(key)
+    if cached and t0 - cached[0] < _WEB_CACHE_SECONDS:
+        return cached[1], 0
     try:
         import mcp_client
-        from mcp_registry import MCP_SERVERS
-        if "search" not in MCP_SERVERS:
+        if not _search_available():
             return None, 0
         query = " ".join(str(k) for k in keywords)[:200]
-        reply = mcp_client.call_tool("search", "tavily_search", {"query": query, "max_results": 5, "search_depth": "basic"})
-        if isinstance(reply, dict) and reply.get("error"):
-            raise RuntimeError(reply["error"])
-        data = json.loads(reply) if isinstance(reply, str) else reply
+        _, results = mcp_client.web_search(query, 5)
         lines = []
-        for r in (data.get("results") or [])[:5]:
+        for r in results[:5]:
             title = _clip(r.get("title"), 120)
             content = " ".join(str(r.get("content") or "").split())[:300]
             if title or content:
                 lines.append(f"- {title}: {content}")
         if not lines:
             raise ValueError("no results")
-        return _WEB_CONTEXT.format(results="\n".join(lines)), int((time.monotonic() - t0) * 1000)
+        block = _WEB_CONTEXT.format(results="\n".join(lines))
+        if len(_web_cache) >= _WEB_CACHE_MAX:
+            _web_cache.pop(min(_web_cache, key=lambda k: _web_cache[k][0]), None)
+        _web_cache[key] = (time.monotonic(), block)
+        return block, int((time.monotonic() - t0) * 1000)
     except Exception as e:
         logger.warning("brief search: skipped (%s)", e)
         return None, int((time.monotonic() - t0) * 1000)
@@ -577,12 +602,9 @@ def generate_brief_stream(
     }
     # "read" and "focus" wait for a quick web search over the topics (so a
     # bare name gets placed rather than asked about); "character" doesn't
-    # need it and starts straight away. No search configured, no wait.
-    try:
-        from mcp_registry import MCP_SERVERS
-        searching = "search" in MCP_SERVERS
-    except Exception:
-        searching = False
+    # need it and starts straight away. No search configured (or Tavily
+    # paused at its usage limit), no wait.
+    searching = _search_available()
 
     read = None
     paragraphs: dict[str, str] = {}

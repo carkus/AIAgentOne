@@ -253,10 +253,14 @@ def search_image(query: str) -> dict:
     but web images aren't necessarily freely licensed), then falls back to
     the Wikipedia lookup below (named topics only, freely licensed).
     """
-    if os.environ.get("TAVILY_API_KEY"):
+    import mcp_client
+    # Same credits as the Tavily MCP server: skip while it's paused at its
+    # usage limit, and pause it if this call hits the limit.
+    if os.environ.get("TAVILY_API_KEY") and not mcp_client.quota_exhausted("search"):
         found = _search_image_tavily(query)
         if "error" not in found:
             return found
+        mcp_client.note_error("search", found["error"])
         logger.warning("search_image: Tavily failed (%s), falling back to Wikipedia", found["error"])
     return _search_image_wikipedia(query)
 

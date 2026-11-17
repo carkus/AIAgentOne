@@ -1331,30 +1331,39 @@ def _run_agent_stream(messages: list, agent_config: dict, allow_delegation: bool
     _findings_desc = "listing counts, job titles, salary ranges, company names" if is_job_search_agent else "key facts, figures, names, and comparisons"
 
     # General/Research agents (and their workers, which inherit `template`)
-    # always get Tavily web search when it's configured, rather than only when
+    # always get web search when it's configured, rather than only when
     # bootstrap happened to pick it. Without it the only way to the web is
     # fetch_page on a URL the model already knows, and small models guess
     # (microsoft.com, example.com). Added at run time so saved agents get it
     # too; respects an Advanced Setup MCP allow-list.
-    _agent_tools = list(agent_config.get("tools") or [])
-    _search_ref = {"source": "mcp", "mcp_server": "search", "mcp_tool": "tavily_search"}
+    # A vetted server paused at its usage limit (Tavily's monthly credits) is
+    # left out, including when bootstrap picked it, so the agent doesn't
+    # spend rounds on a call that can only fail.
+    _agent_tools = [
+        t for t in (agent_config.get("tools") or [])
+        if not (t.get("source") == "mcp" and mcp_client.quota_exhausted(t.get("mcp_server") or ""))
+    ]
+    # Web search is whichever provider is usable now (Tavily, then Exa;
+    # mcp_client.active_web_search), so a saved agent built while Tavily
+    # was up switches to Exa without a rebuild.
+    _web = mcp_client.active_web_search()
+    _search_ref = {"source": "mcp", "mcp_server": _web["server_id"], "mcp_tool": _web["tool"]} if _web else None
     if (
-        agent_config.get("template") in ("general", "research")
-        and not any(t.get("mcp_server") == "search" and t.get("mcp_tool") == "tavily_search" for t in _agent_tools)
-        and not any(t.get("name") == "tavily_search" for t in _agent_tools)
+        _web
+        and agent_config.get("template") in ("general", "research")
+        and not any(mcp_client.web_search_provider(t.get("mcp_server"), t.get("mcp_tool")) for t in _agent_tools)
+        and not any(t.get("name") == _web["tool"] for t in _agent_tools)
         and agent_spec.tool_def_allowed(_search_ref, spec)
     ):
-        real = next((c for c in mcp_client.list_tools("search") if c["tool_name"] == "tavily_search"), None)
-        if real:
-            _agent_tools.append({
-                **_search_ref,
-                "name": "tavily_search",
-                "description": real["description"],
-                "input_schema": real["input_schema"],
-            })
+        _agent_tools.append({
+            **_search_ref,
+            "name": _web["tool"],
+            "description": _web["description"],
+            "input_schema": _web["input_schema"],
+        })
     _web_search_name = next(
         (t["name"] for t in _agent_tools
-         if t.get("source") == "mcp" and t.get("mcp_server") == "search" and t.get("mcp_tool") == "tavily_search"
+         if t.get("source") == "mcp" and mcp_client.web_search_provider(t.get("mcp_server"), t.get("mcp_tool"))
          and agent_spec.tool_def_allowed(t, spec)),
         None,
     )
@@ -2552,7 +2561,12 @@ clarifying question only belongs AFTER you've already produced real findings
                     # Routed to the real vetted MCP server, not exec()'d —
                     # this is the whole point of CLAUDE.md's MCP priority 6:
                     # bootstrap picked the tool, never wrote its implementation.
-                    result = mcp_client.call_tool(tool_def["mcp_server"], tool_def["mcp_tool"], tool_inputs)
+                    # A web search that hits its provider's limit is re-run on
+                    # the next provider (Tavily -> Exa) within the same call.
+                    _call = (mcp_client.call_web_search
+                             if mcp_client.web_search_provider(tool_def["mcp_server"], tool_def["mcp_tool"])
+                             else mcp_client.call_tool)
+                    result = _call(tool_def["mcp_server"], tool_def["mcp_tool"], tool_inputs)
                 else:
                     implementation = tool_def["implementation"] if tool_def else "result = 'Unknown tool'"
                     result = execute_tool(implementation, tool_inputs)

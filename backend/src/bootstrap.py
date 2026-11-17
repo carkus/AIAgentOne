@@ -592,7 +592,12 @@ def _build_prompt(
             for e in fewshot_entries
         ]
         report["catalog"] = [f'{c["server_id"]}/{c["tool_name"]}' for c in mcp_catalog]
-    _has_web_search_mcp = any(c["server_id"] == "search" for c in mcp_catalog)
+    # The web search to point the model at: the active provider (Tavily, or
+    # Exa while Tavily is unavailable), if it's in this catalog.
+    _web = mcp_client.active_web_search()
+    _has_web_search_mcp = bool(_web) and any(
+        c["server_id"] == _web["server_id"] and c["tool_name"] == _web["tool"] for c in mcp_catalog
+    )
     # search_jobs is only ever wired up at runtime for a job_search agent
     # (agent_stream.run_agent_stream gates it by AgentConfig.template) — an
     # unset agent_type (e.g. a delegated worker whose parent isn't job_search)
@@ -681,7 +686,7 @@ def _build_prompt(
             "internet-search tool of your own, and do NOT call `fetch_page` with a "
             "guessed or hardcoded URL when the actual need is \"find pages about X\" "
             "rather than \"fetch this exact URL I already have\" — use the vetted "
-            "`tavily_search` MCP tool (server \"search\" in the list above, added via "
+            f"`{_web['tool']}` MCP tool (server \"{_web['server_id']}\" in the list above, added via "
             "the `\"source\": \"mcp\"` shape) for that instead"
             f"{jobsearch_pronoun_suffix}\n"
         )

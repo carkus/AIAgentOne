@@ -74,8 +74,8 @@ expecting it to reach production.
 | `backend/src/embeddings.py` | `embed_text()` — Gemini (`gemini-embedding-2-preview`) or Ollama (`nomic-embed-text`) embeddings + cosine similarity, used for bootstrap grounding |
 | `backend/src/bootstrap_memory.py` | Store of past `purpose → generated config` pairs (`bootstrap_memory` table in `db.py`); `record()`/`retrieve_similar()` power bootstrap few-shot grounding (RAG) |
 | `backend/src/focus_insights.py` | Smart Focus for Setup's Focus step (`POST /brief-focus`, no chat call): embeds chosen topics and the Saved Focus pool, flags near-duplicate topic pairs (one-click remove) and suggests related saved topics. Per-backend `THRESHOLDS` (nomic measured, Gemini estimated); in-process memo of embeddings; `None` → the step shows nothing extra |
-| `backend/src/mcp_registry.py` | The vetted MCP server directory — `mcp-server-time`/`mcp-server-fetch` (stdio, official reference servers) plus Tavily's official remote MCP server for general web search (`"http"` transport, only added when `TAVILY_API_KEY` is set) — where a new trusted MCP server is added |
-| `backend/src/mcp_client.py` | Sync wrapper around the official `mcp` SDK — `_session_cm()` picks stdio or Streamable HTTP per server; `catalog_summary()` lists real tool schemas, `call_tool()` executes one |
+| `backend/src/mcp_registry.py` | The vetted MCP server directory — `mcp-server-time`/`mcp-server-fetch` (stdio, official reference servers) plus Tavily's official remote MCP server for general web search (`"http"` transport, only added when `TAVILY_API_KEY` is set) and Exa's official remote MCP server as the fallback web search (always registered; keyless endpoint unless `EXA_API_KEY` is set, free tier, no card). `WEB_SEARCH_PROVIDERS` orders them (Tavily, then Exa) — where a new trusted MCP server is added |
+| `backend/src/mcp_client.py` | Sync wrapper around the official `mcp` SDK — `_session_cm()` picks stdio or Streamable HTTP per server; `catalog_summary()` lists real tool schemas, `call_tool()` executes one. A remote server whose call comes back "usage limit reached" (Tavily's monthly credits) is paused for an hour (`quota_exhausted()`): left out of the catalog, the agent's tool list, the brief's search and `search_image`, then retried (a rate limit pauses it for 60 s). `active_web_search()` picks the web search agents, bootstrap and the brief use; `call_web_search()` re-runs a search on the next provider when one hits its limit mid-turn; `GET /models/web-search` feeds the 🔎 line under the model in Setup and Chat (`WebSearchLabel.tsx`) |
 | `backend/src/agent_registry.py` | Store of *published* agents (`agent_registry` table in `db.py`) — the explicit, human-in-the-loop persistence step (partially addresses Limitation #7) that backs `mcp_server.py`'s tool list; `publish()`/`unpublish()`/`list_agents()`/`get_by_tool_name()` |
 | `backend/mcp_server.py` | Runnable entrypoint (sibling of `server.py`, not in `src/`) exposing every published agent as an MCP tool over Streamable HTTP — its own ASGI process (`uvicorn`), since the `mcp` SDK's HTTP transports are Starlette-only and can't share Flask/gunicorn |
 | `backend/src/eval_checks.py` | Self-evaluation checks (bootstrap/chat-response/tool-call/worker-delegation) — every recorded result carries the `provider`/`model` that produced the thing being graded, which is what makes `bandit.py` possible |
@@ -105,6 +105,7 @@ expecting it to reach production.
 | `frontend/src/components/AgentMakingReport.tsx` | "How this agent was made" above the chat, open by default: the brief, grounding (similar past agents with match %, MCP tools offered), the design call's model/persona/proposed tools, what the code checks caught and whether the retry fixed it or the tool was dropped, spec rules applied, the final persona/system prompt/tools with their code, self-checks and whether it was saved to memory; read from `AgentConfig.bootstrap_report` (written by `_generate_agent_config_stream`), with the `bootstrap_trace` timings (`CaseFile`) underneath |
 | `frontend/src/components/ProcessGraph.tsx`, `ColumnGraph.tsx` | Setup's live process graph, in the "Build your agent" panel with the 1-4 step breadcrumbs above it (the bootstrap shield covers only the step's working panel below it, so the graph stays visible during deploy, when it narrows to the deploy stages): Character → Focus → Brief → Outputs as taken so far, then bootstrap's stages from the `stage` tag on its `status` events (grounding → design → one node per streamed tool → code checks → self-checks → ready), each node pending/active/done/skipped/failed; a failed or cancelled run stays drawn on the steps. `ColumnGraph` is the shared column layout/fit/zoom, also used by `BriefGraph` |
 | `frontend/src/styles/AgentHeader.module.css` | The agent header shared by Setup (create) and Chat (deployment): row 1 name + meta line (model, location, time, traits; plain text, no badge borders), row 2 an action strip of same-size buttons (`btn`, `btnText`, `btnPrimary`, `btnOpen`). Each page keeps its own buttons; Setup's Deploy toolbar is separate and not part of it |
+| `frontend/src/components/ReleaseNotes.tsx`, `frontend/src/releaseNotes.json`, `tools/release-notes/make_pdf.py` | Release Notes. Setup's "Release Notes · v…" link (bottom left, opposite the Deploy toolbar, Setup only) opens `#/release-notes` in a new tab; `App.tsx` shows `ReleaseNotes` instead of the phases on that hash. The version is `package.json`'s, injected as `__APP_VERSION__` by `vite.config.ts`. All the text lives in `releaseNotes.json`: an `unreleased` list of tagged changes that `tools/release-notes/release.py` turns into the next version on deploy, and a `releases` list, newest first, each needing only `version`/`date`/`title` (intro, headline table, fix groups, services tables and closing are optional; inline `**bold**` and `` `code` `` only). The page shows every release with a version jump list; `make_pdf.py` (reportlab, Segoe UI) builds one release, the newest by default or `--version X`, to `tools/release-notes/AgentOne_release_notes_v<version>.pdf`, and warns if the newest release doesn't match `package.json`. See [Versioning](#versioning) |
 | `frontend/src/components/MermaidDiagram.tsx` | Renders one Mermaid chart string to SVG via the `mermaid` package, themed to match the app's dark-cyan palette; used by `Chat.tsx` for ` ```mermaid ` fences in assistant replies |
 
 ---
@@ -755,6 +756,58 @@ deploy/redeploy.sh all        # both
 ```
 
 Run from the repo root; requires SSH access to the droplet (no git or CI there — code is shipped as a tarball).
+
+---
+
+## Versioning
+
+The app version is `frontend/package.json`'s `version` (shown on Setup's
+Release Notes link and page). It is MAJOR.MINOR.PATCH and **nobody picks it
+by hand**: it's worked out on deploy from the kinds of change made since the
+last one. The user doesn't want to set it subjectively.
+
+**Every user-visible change adds an entry, at the time it's made.** Append
+to `unreleased` in `frontend/src/releaseNotes.json`:
+
+```json
+{"kind": "fix", "title": "Short name", "text": "One or two plain sentences on what a user notices."}
+```
+
+`kind` is judged per change, by what a user of Agent One would notice:
+
+- **`fix`**: changes no behaviour a user relies on, e.g. a quota pause, a
+  layout nudge, a bug fix.
+- **`feature`**: something new or a clear change to how something works,
+  e.g. a new search provider, a new page, a new default model.
+- **`breaking`**: saved things stop working (a saved agent or chat format old
+  saves can't load, a published MCP tool's interface changing).
+
+Internal-only work (refactors, tests, tooling, CLAUDE.md) gets no entry.
+`text` may use `**bold**` and `` `code` ``; the longer
+`problem`/`fix`/`result` form also works.
+
+**On deploy** (`deploy/redeploy.sh frontend` or `all`),
+`tools/release-notes/release.py` runs first:
+
+- the highest kind decides the bump: `breaking` → major, `feature` → minor,
+  `fix` → patch. Below 1.0 `breaking` is a minor, so 1.0 only happens on
+  purpose (`release.py --major`);
+- it writes the version into `package.json` and `package-lock.json`, moves
+  the entries into a new first `releases` entry (dated today, titled from the
+  counts, grouped New / Fixes / Breaking changes; edit the title afterwards
+  if wanted) and empties `unreleased`;
+- then `make_pdf.py` builds that release's PDF (a failure there doesn't stop
+  the deploy);
+- nothing unreleased: no bump. A re-run after a failed deploy doesn't bump
+  twice.
+
+A `backend`-only deploy doesn't version (the number shows in the frontend);
+it says so when unreleased entries are waiting. `release.py --dry-run` shows
+the next version without changing anything. 1.0 is when saved agents and
+published tools are promised to stay compatible.
+
+0.9.0 (2026-11-17) is the first numbered release, covering everything up to
+the Exa fallback search and the Release Notes page.
 
 ---
 

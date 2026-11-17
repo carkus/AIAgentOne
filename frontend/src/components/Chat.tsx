@@ -19,6 +19,7 @@ import RelicPreviewModal from './RelicPreviewModal'
 import { downloadRelic, RELIC_KINDS, RELIC_LABELS, relicFilename } from '../relicFiles'
 import ImageViewer from './ImageViewer'
 import FeedbackStatusBar from './FeedbackStatusBar'
+import WebSearchLabel from './WebSearchLabel'
 import type { AgentConfig, EvalResultItem, Relic, RelicKind, RelicSuggestion, ResultFeedback, SavedChat, SavedChatMessage, StreamEvent, TeamMember, ToolCall, TraceSpan } from '../types'
 import { describeModel, describeModelFallback, describeServedModel, formatModelInfo, lastServedModel, type ModelInfo } from '../modelLabel'
 import { normalizeInlineOrderedLists } from '../markdownFormat'
@@ -1147,9 +1148,6 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
           <div className={ah.identity}>
             <span className={ah.name}>Agent {agentName}</span>
             <div className={ah.meta}>
-              <span className={ah.metaItem} title={shownModelTitle}>
-                <span aria-hidden="true">🧠</span> {shownModel}
-              </span>
               {usedLocation && (
                 <span className={ah.metaItem}>
                   <ToolbarIcon name="location" /> {usedLocation}
@@ -1163,6 +1161,15 @@ export default function Chat({ agentConfig, agentName, onReset, onBackToSetup, i
                   {activePersonalityLabels.join(' · ')}
                 </span>
               )}
+            </div>
+            {/* The model and web search, far right as on Setup. */}
+            <div className={`${ah.meta} ${ah.metaRight}`}>
+              <span className={ah.metaStack}>
+                <span className={ah.metaItem} title={shownModelTitle}>
+                  <span aria-hidden="true">🧠</span> {shownModel}
+                </span>
+                <WebSearchLabel refresh={messages.length} />
+              </span>
             </div>
           </div>
           <div className={ah.actions}>

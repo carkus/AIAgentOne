@@ -26,15 +26,17 @@ shrink the catalog bootstrap sees, not break bootstrap or the agent loop.
 """
 import asyncio
 import concurrent.futures
+import json
 import logging
 import os
+import re
 import time
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamable_http_client
 
-from mcp_registry import MCP_SERVERS
+from mcp_registry import MCP_SERVERS, WEB_SEARCH_PROVIDERS
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +47,52 @@ _catalog_cache: dict[str, list[dict]] = {}
 # respawned the failing server and waited for it again, ~4-5s each time.
 _failed_at: dict[str, float] = {}
 _FAILURE_RETRY_SECONDS = 300
+
+# server_id -> monotonic time a call last came back "plan/usage limit
+# reached" (Tavily's monthly credits). While set, the server is left out of
+# the catalog (bootstrap, the agent's auto-added tavily_search, the brief) and
+# calls fail at once, so agents stop spending rounds on a search that can only
+# fail. Retried after QUOTA_RETRY_SECONDS, since the reset date depends on the
+# account's billing cycle; a refused call costs no credits.
+# A rate limit (too many calls a minute, e.g. Exa's keyless endpoint) gets a
+# short pause instead.
+_paused_until: dict[str, float] = {}
+QUOTA_RETRY_SECONDS = float(os.environ.get("MCP_QUOTA_RETRY_SECONDS", "3600"))
+RATE_LIMIT_PAUSE_SECONDS = 60
+_QUOTA_RE = re.compile(
+    r"\b432\b|usage limit|plan limit|exceeds your plan|quota|out of credits|insufficient credits",
+    re.IGNORECASE,
+)
+_RATE_RE = re.compile(r"\b429\b|rate.?limit|too many requests", re.IGNORECASE)
+
+
+def quota_exhausted(server_id: str) -> bool:
+    until = _paused_until.get(server_id)
+    return until is not None and time.monotonic() < until
+
+
+def note_error(server_id: str, error: object) -> bool:
+    """Pause `server_id` if `error` reads as a usage-limit (or rate-limit)
+    refusal. Returns True when it did. Also used by tools.py's direct Tavily
+    image search. Remote ("http") servers only: a stdio server like fetch
+    can echo a fetched site's own "quota exceeded" page, which isn't its
+    own limit."""
+    if MCP_SERVERS.get(server_id, {}).get("transport") != "http":
+        return False
+    text = str(error)
+    if _QUOTA_RE.search(text):
+        seconds, why = QUOTA_RETRY_SECONDS, "usage limit"
+    elif _RATE_RE.search(text):
+        seconds, why = RATE_LIMIT_PAUSE_SECONDS, "rate limit"
+    else:
+        return False
+    if not quota_exhausted(server_id):
+        logger.warning(
+            "MCP server '%s' hit its %s; pausing it for %ds: %s",
+            server_id, why, seconds, text[:200],
+        )
+    _paused_until[server_id] = max(_paused_until.get(server_id, 0), time.monotonic() + seconds)
+    return True
 
 # Neither the stdio subprocess round trip nor the Streamable HTTP session has
 # any timeout of its own — a vetted server that hangs (crashed subprocess
@@ -111,6 +159,7 @@ async def _list_tools_async(server_id: str) -> list[dict]:
         async with ClientSession(streams[0], streams[1]) as session:
             await session.initialize()
             result = await session.list_tools()
+            only = MCP_SERVERS[server_id].get("tools")
             return [
                 {
                     "server_id": server_id,
@@ -119,6 +168,7 @@ async def _list_tools_async(server_id: str) -> list[dict]:
                     "input_schema": _field(t, "input_schema", "inputSchema") or {"type": "object", "properties": {}},
                 }
                 for t in result.tools
+                if not only or t.name in only
             ]
 
 
@@ -182,7 +232,9 @@ def _describe_exception(e: BaseException) -> str:
 def list_tools(server_id: str) -> list[dict]:
     """Real tool schemas from a running vetted server — cached after first
     success. Returns [] if the server isn't installed/reachable, logged but
-    not raised."""
+    not raised. [] while the server is paused at its usage limit."""
+    if quota_exhausted(server_id):
+        return []
     if server_id in _catalog_cache:
         return _catalog_cache[server_id]
     if server_id not in MCP_SERVERS:
@@ -216,11 +268,105 @@ def catalog_summary() -> list[dict]:
 
 
 def call_tool(server_id: str, tool_name: str, inputs: dict) -> dict:
+    if quota_exhausted(server_id):
+        return {"error": f"{server_id}.{tool_name} is unavailable: its usage limit has been reached. Use other tools or your own knowledge."}
     try:
-        return _run(_call_tool_async(server_id, tool_name, inputs))
+        result = _run(_call_tool_async(server_id, tool_name, inputs))
     except Exception as e:
         description = _describe_exception(e)
         logger.warning(
             "MCP call to %s.%s failed: %s", server_id, tool_name, description, exc_info=True,
         )
+        note_error(server_id, description)
         return {"error": f"MCP call to {server_id}.{tool_name} failed: {description}"}
+    if isinstance(result, dict) and result.get("error"):
+        note_error(server_id, result["error"])
+    return result
+
+
+# ---- Web search: Tavily first, then Exa (mcp_registry.WEB_SEARCH_PROVIDERS)
+
+
+def active_web_search() -> dict | None:
+    """The provider agents, bootstrap and the brief should search with now:
+    the first in WEB_SEARCH_PROVIDERS that's registered, not paused at a
+    limit, and actually lists its search tool. Its registry entry plus the
+    tool's real description/input_schema, or None when there's no web
+    search at all."""
+    for p in WEB_SEARCH_PROVIDERS:
+        if p["server_id"] not in MCP_SERVERS or quota_exhausted(p["server_id"]):
+            continue
+        real = next((c for c in list_tools(p["server_id"]) if c["tool_name"] == p["tool"]), None)
+        if real:
+            return {**p, "description": real["description"], "input_schema": real["input_schema"]}
+    return None
+
+
+def web_search_provider(server_id: str | None, tool: str | None) -> dict | None:
+    """The WEB_SEARCH_PROVIDERS entry for this MCP tool, if it is one."""
+    return next((p for p in WEB_SEARCH_PROVIDERS if p["server_id"] == server_id and p["tool"] == tool), None)
+
+
+def web_search_status() -> dict:
+    """For the UI: the provider in use now and any paused at a limit."""
+    active = active_web_search()
+    return {
+        "active": active["label"] if active else None,
+        "paused": [p["label"] for p in WEB_SEARCH_PROVIDERS
+                   if p["server_id"] in MCP_SERVERS and quota_exhausted(p["server_id"])],
+    }
+
+
+def call_web_search(server_id: str, tool_name: str, inputs: dict):
+    """call_tool for a web search tool, falling back mid-turn: if the call
+    fails because this provider just hit (or is paused at) its limit, the
+    same query goes to the next usable provider."""
+    result = call_tool(server_id, tool_name, inputs)
+    if not (isinstance(result, dict) and result.get("error")) or not quota_exhausted(server_id):
+        return result
+    fallback = active_web_search()
+    query = str((inputs or {}).get("query") or "").strip()
+    if not fallback or not query:
+        return result
+    try:
+        n = int((inputs or {}).get("max_results") or (inputs or {}).get("numResults") or 5)
+    except (TypeError, ValueError):
+        n = 5
+    logger.info("web search: %s unavailable, using %s", server_id, fallback["label"])
+    return call_tool(fallback["server_id"], fallback["tool"], fallback["args"](query, max(1, min(n, 10))))
+
+
+def _parse_search_results(reply) -> list[dict]:
+    """[{title, content}] from either provider's reply: Tavily's JSON
+    ({"results": [...]}) or Exa's text blocks ("Title: ...", "URL: ...",
+    "Highlights: ...")."""
+    data = reply
+    if isinstance(reply, str):
+        try:
+            data = json.loads(reply)
+        except ValueError:
+            data = None
+    if isinstance(data, dict):
+        return [{"title": r.get("title"), "content": r.get("content")} for r in (data.get("results") or [])]
+    if not isinstance(reply, str):
+        return []
+    out = []
+    for block in re.split(r"(?m)^Title:\s*", reply)[1:]:
+        title, _, rest = block.partition("\n")
+        body = rest.split("Highlights:", 1)[1] if "Highlights:" in rest else rest
+        body = re.sub(r"(?m)^(URL|Published|Author|Text):.*$", "", body)
+        out.append({"title": title.strip(), "content": body.strip()})
+    return out
+
+
+def web_search(query: str, n: int = 5) -> tuple[str | None, list[dict]]:
+    """One search on the active provider (falling back on a limit): its
+    label and [{title, content}]. Raises RuntimeError on failure."""
+    provider = active_web_search()
+    if not provider:
+        raise RuntimeError("no web search available")
+    reply = call_web_search(provider["server_id"], provider["tool"], provider["args"](query, n))
+    if isinstance(reply, dict) and reply.get("error"):
+        raise RuntimeError(reply["error"])
+    used = active_web_search() or provider
+    return used["label"], _parse_search_results(reply)

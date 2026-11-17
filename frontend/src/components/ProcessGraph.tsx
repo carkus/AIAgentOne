@@ -25,6 +25,8 @@ export interface ProcessNodeData extends Record<string, unknown> {
   link?: boolean
   // The Setup step currently open.
   selected?: boolean
+  // The brief is waiting on the user's answer: drawn in the question colours.
+  asking?: boolean
   first?: boolean
   last?: boolean
 }
@@ -40,7 +42,7 @@ const STATE_LABEL: Record<ProcessState, string> = {
 function ProcessNode({ data }: { data: ProcessNodeData }) {
   return (
     <div
-      className={`${styles.node} ${styles[`node_${data.state}`]}${data.link ? ` ${styles.nodeLink}` : ''}${data.selected ? ` ${styles.nodeSelected}` : ''}`}
+      className={`${styles.node} ${styles[`node_${data.state}`]}${data.link ? ` ${styles.nodeLink}` : ''}${data.asking ? ` ${styles.nodeAsking}` : ''}${data.selected ? ` ${styles.nodeSelected}` : ''}`}
       aria-label={`${data.title}: ${STATE_LABEL[data.state]}${data.selected ? ' (open)' : ''}`}
       aria-current={data.selected ? 'step' : undefined}
       title={data.link ? `Go to the ${data.title} step` : undefined}

@@ -1,8 +1,11 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import pkg from './package.json'
 
 export default defineConfig({
   plugins: [react()],
+  // The app version (package.json), shown beside Setup's Release Notes link.
+  define: { __APP_VERSION__: JSON.stringify(pkg.version) },
   server: {
     port: 5273,
     strictPort: true,

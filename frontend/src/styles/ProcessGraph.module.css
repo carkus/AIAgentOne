@@ -20,6 +20,11 @@
 .nodeLink { cursor: pointer; }
 .nodeLink:hover { border-color: var(--graph-80); opacity: 1; }
 
+/* The brief is asking the user a question: the question frame's colours
+   (--question-bg/--question-border, shared with Setup's .briefQuestionBox). */
+.nodeAsking,
+.nodeAsking:hover { background: var(--question-bg); border-color: var(--question-border); }
+
 /* The step that's open: a ring just outside the card, darkest ink, and
    full strength even if the step is still pending. */
 .nodeSelected,

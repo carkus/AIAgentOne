@@ -4,6 +4,7 @@ import AdvancedSetup from './components/AdvancedSetup'
 import Chat from './components/Chat'
 import SplashScreen from './components/SplashScreen'
 import MobileNotice from './components/MobileNotice'
+import ReleaseNotes from './components/ReleaseNotes'
 import type { AgentConfig, SavedChat } from './types'
 import { SURNAMES } from './surnames'
 import { getLastOpenedPointer, loadSavedChats, setLastOpenedPointer } from './chatStorage'
@@ -19,7 +20,17 @@ function randomSurname(): string {
   return SURNAMES[Math.floor(Math.random() * SURNAMES.length)]
 }
 
+const RELEASE_NOTES_HASH = '#/release-notes'
+
 export default function App() {
+  // The Release Notes page (Setup's link opens it in a new tab) is its own
+  // address, #/release-notes, shown instead of the app's phases.
+  const [releaseNotes, setReleaseNotes] = useState(() => window.location.hash === RELEASE_NOTES_HASH)
+  useEffect(() => {
+    const onHash = () => setReleaseNotes(window.location.hash === RELEASE_NOTES_HASH)
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
   const [phase, setPhase] = useState<Phase>('restoring')
   const [agentConfig, setAgentConfig] = useState<AgentConfig | null>(null)
   const [bootstrapError, setBootstrapError] = useState<string | null>(null)
@@ -147,7 +158,9 @@ export default function App() {
 
   return (
     <div style={styles.root}>
-      {phase === 'restoring' ? null : phase === 'splash' ? (
+      {releaseNotes ? (
+        <ReleaseNotes />
+      ) : phase === 'restoring' ? null : phase === 'splash' ? (
         <SplashScreen onDone={() => setPhase('setup')} />
       ) : phase === 'advanced' ? (
         <AdvancedSetup onCancel={() => setPhase('setup')} onDone={handleAdvancedDone} />

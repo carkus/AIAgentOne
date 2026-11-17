@@ -32,6 +32,10 @@
      read as shades of a single ink rather than a set of signal colours.
      Derived, so the theme picker's text colour carries through. */
   --graph-10: color-mix(in srgb, var(--color-text) 6%, white);
+  /* The brief's question: its frame on the Brief step and the Brief node in
+     the process graph both use these, so they stay the same colour. */
+  --question-bg: #fbf3e2;
+  --question-border: #e8d2a0;
   --graph-20: color-mix(in srgb, var(--color-text) 20%, white);
   --graph-35: color-mix(in srgb, var(--color-text) 35%, white);
   --graph-50: color-mix(in srgb, var(--color-text) 50%, white);

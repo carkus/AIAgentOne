@@ -23,6 +23,7 @@ import CharacterGenerator from './CharacterGenerator'
 import HelpTip from './HelpTip'
 import BehaviorIcon from './BehaviorIcon'
 import RelicPreviewModal from './RelicPreviewModal'
+import WebSearchLabel from './WebSearchLabel'
 import { useToolbarDrag, useToolbarLayout, type ToolbarItem } from '../toolbarLayout'
 import { downloadRelic, RELIC_KINDS, RELIC_LABELS, relicFilename } from '../relicFiles'
 
@@ -642,6 +643,12 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
     setSelectedTraits(prev => prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id])
   }
   const [aiBrief, setAiBrief] = useState<AgentBrief | null>(null)
+  // When the brief asks the user a question, open the Brief step so they see
+  // it. Once per question: they can still move to another step meanwhile.
+  const briefQuestion = aiBrief?.type === 'question' ? aiBrief.text : null
+  useEffect(() => {
+    if (briefQuestion) setSetupStep('brief')
+  }, [briefQuestion])
   const [briefLoading, setBriefLoading] = useState(false)
   // The brief's graph, drawn in the brief's last stage alongside its third
   // paragraph. Null while drawing or when drawing failed.
@@ -1025,7 +1032,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
               : `Drafting the brief: ${shownBriefStages(briefProgress).filter(s => briefProgress.stages[s.id] === 'done').length} of ${shownBriefStages(briefProgress).length} parts done`
             : 'Drafting the brief…' }
         : aiBrief?.type === 'question'
-          ? { icon: '📝', title: 'Brief', state: 'active', detail: `Asking you: ${aiBrief.text}` }
+          ? { icon: '📝', title: 'Brief', state: 'active', asking: true, detail: `Asking you: ${aiBrief.text}` }
           : aiBrief
             ? { icon: '📝', title: 'Brief', state: 'done', detail: aiBrief.text.length > 160 ? `${aiBrief.text.slice(0, 157)}…` : aiBrief.text }
             : briefError
@@ -1743,15 +1750,18 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
             <div className={ah.identity}>
               <h1 className={`${ah.name} ${styles.setupAgentName}`}>Agent {agentName}</h1>
               <div className={`${ah.meta} ${styles.setupModelMeta}`}>
-                <button
-                  type="button"
-                  className={ah.metaItem}
-                  onClick={ev => { ev.stopPropagation(); setSettingsOpen(true) }}
-                  title={describeModelFallback(provider)}
-                >
-                  <span aria-hidden="true">🧠</span>
-                  <span>{describeModel(provider, activeModel)}</span>
-                </button>
+                <span className={ah.metaStack}>
+                  <button
+                    type="button"
+                    className={ah.metaItem}
+                    onClick={ev => { ev.stopPropagation(); setSettingsOpen(true) }}
+                    title={describeModelFallback(provider)}
+                  >
+                    <span aria-hidden="true">🧠</span>
+                    <span>{describeModel(provider, activeModel)}</span>
+                  </button>
+                  <WebSearchLabel />
+                </span>
               </div>
             </div>
             <div className={ah.actions}>
@@ -2464,6 +2474,16 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
 
           {/* Save toolbar and Deploy share one row. */}
           <div className={styles.saveDeployRow}>
+          {/* Bottom left, opposite the Deploy toolbar. */}
+          <a
+            href="#/release-notes"
+            target="_blank"
+            rel="noopener"
+            className={styles.releaseNotesLink}
+            title="What changed in Agent One, and the AI services it uses"
+          >
+            Release Notes · v{__APP_VERSION__}
+          </a>
           {commissionHint && (
             <p className={styles.commissionHint} role="status">{commissionHint}</p>
           )}

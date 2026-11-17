@@ -40,6 +40,21 @@
   min-width: 0;
 }
 
+/* A meta block pushed to the far right of row 1 (Chat's model, matching
+   Setup's .setupModelMeta). */
+.metaRight {
+  margin-left: auto;
+}
+
+/* The model with the web search line under it. */
+.metaStack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
 /* One meta item (model, location, time, traits): plain text, no border. */
 .metaItem {
   display: inline-flex;
