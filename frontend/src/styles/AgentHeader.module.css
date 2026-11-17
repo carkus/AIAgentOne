@@ -132,8 +132,19 @@
 .btnSettings {
   font-size: 2.9rem;
   line-height: 0; /* the glyph is bigger than the button; keep the button's size */
+  margin-right: 10px;
 }
 
+/* In the toolbox the button is 10% bigger than the other toolbox buttons
+   (2rem → 2.2rem), with the glyph scaled the same. The glyph's real size is
+   .btn's font-size-sm (0.875rem): .btn comes later in this file and wins
+   over .btnSettings' 2.9rem above, which never applies. */
+.toolbox > .btnSettings {
+  width: 2.2rem;
+  min-width: 2.2rem;
+  height: 2.2rem;
+  font-size: calc(var(--font-size-sm) * 1.1);
+}
 /* A .btn that is a <label> (no :disabled of its own). */
 .btnDisabled {
   opacity: 0.45;

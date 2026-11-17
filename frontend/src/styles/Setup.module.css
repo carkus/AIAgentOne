@@ -104,7 +104,7 @@
   align-items: center;
   background: rgba(5, 55, 80, 0.1);
   border: 1px solid var(--color-accent);
-  border-radius: 5px;
+  border-radius: var(--radius-pill);
   color: var(--color-accent);
   display: inline-flex;
   font-family: 'Share Tech Mono', monospace;
@@ -113,7 +113,7 @@
   letter-spacing: 0.03em;
   text-transform: uppercase;
   gap: 0.3rem;
-  padding: 0.25rem 0.5rem 0.25rem 0.65rem;
+  padding: 0.25rem 0.12rem 0.25rem 0.65rem;
 }
 
 /* A selected chip's text: click to edit it in place. Styled as plain chip
@@ -150,17 +150,18 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.38rem;
-  height: 1.38rem;
+  width: 1.15rem;
+  height: 1.15rem;
   background: var(--color-surface);
   border: 1px solid rgba(112, 131, 147, 0.4);
   border-radius: 999px;
   color: #708393;
   cursor: pointer;
-  font-size: 0.78rem;
+  font-size: 0.68rem;
   line-height: 1;
   padding: 0;
   flex-shrink: 0;
+  margin-left: 0.45rem; /* sits further right, by the chip's edge */
   transition: color 0.15s, border-color 0.15s;
 }
 
@@ -1190,9 +1191,14 @@
   margin: 0;
   padding: 0;
   list-style: none;
-  color: var(--graph-50);
-  font-size: 0.9em;
-  font-weight: 500;
+  /* Lettering as the section labels (.fieldLabel, e.g. "Written brief for
+     Agent"), one size smaller. */
+  color: var(--color-accent-secondary);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: var(--font-size-xs);
+  font-weight: 400;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
 }
 
 .briefStage {
@@ -1209,13 +1215,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
 }
 
 .briefStageMark .briefUpdatingSpinner {
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
 }
 
 .briefQuestionBox .briefStages { margin-top: 0.5rem; }
@@ -2030,7 +2036,7 @@
   gap: 0.3rem;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 5px;
+  border-radius: var(--radius-pill);
   cursor: pointer;
   padding: 0.25rem 0.5rem 0.25rem 0.65rem;
   transition: background-color 0.15s, border-color 0.15s;
@@ -2134,7 +2140,7 @@
 .savedKeywordAddNew {
   background: #e6f2f1;
   border: 1px dashed #a1aab1;
-  border-radius: 5px;
+  border-radius: var(--radius-pill);
   color: var(--color-accent);
   cursor: pointer;
   font-family: 'Share Tech Mono', monospace;
@@ -3288,20 +3294,20 @@
 
 .locationMapToggle {
   flex: none;
-  width: 0.9rem;
-  height: 0.9rem;
+  width: 1.6rem;
+  height: 0.7rem;
   margin: 0;
   accent-color: var(--graph-100);
   cursor: pointer;
-  /* Round: drawn by hand, since a native checkbox can't be. */
+  /* A flat oval: drawn by hand, since a native checkbox can't be. */
   appearance: none;
-  border: 1.5px solid var(--graph-100);
-  border-radius: 50%;
+  border: 1px solid var(--color-accent-secondary); /* the lighter steel blue */
+  border-radius: 999px;
   background: var(--color-surface);
 }
 
 .locationMapToggle:checked {
-  background: radial-gradient(circle, var(--graph-100) 45%, var(--color-surface) 50%);
+  background: radial-gradient(ellipse, var(--color-accent-secondary) 45%, var(--color-surface) 50%);
 }
 
 .locationMapToggle:disabled {
@@ -3442,10 +3448,15 @@
   gap: 0.6rem;
 }
 
+/* A 1px line, not the glyph (a text "|" is as thick as the font makes it). */
 .typeRowDivider {
-  color: var(--color-accent);
-  font-size: 1.4rem;
-  line-height: 1;
+  align-self: stretch;
+  width: 1px;
+  min-height: 1.4rem;
+  background: var(--color-accent);
+  transform: scaleX(0.5); /* a hairline, as fine as the panel borders */
+  color: transparent;
+  font-size: 0;
 }
 
 .typeRow .typeLocation { /* outranks AgentHeader .toolbox whatever the CSS load order */
@@ -3456,10 +3467,10 @@
   padding: 0;
 }
 
-/* Pill-shaped: the wrapper, the place and the tickbox button all fully rounded. */
+/* Halfway between the Focus chips (5px) and a full pill: the wrapper and the place. */
 .typeLocation,
 .typeLocation .locationMap {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 /* Less padding inside its light-blue border: the same height as the
@@ -3490,22 +3501,32 @@
   text-transform: uppercase;
 }
 
-/* The Character step's Type, Personality and Behaviour pills look like the
-   location pill: white, light-blue border, fully rounded, #3f7ea0 text.
-   Selected ones keep their own colours. Advanced Setup is unchanged. */
+/* The Character step's Type, Personality and Behaviour pills: coloured like
+   the Focus chips (below), rounded with --radius-pill. Advanced Setup is
+   unchanged. */
 .traitsPanel .behaviorIconBtn,
 .traitsPanel .behaviorIconBtnActive,
 .traitsPanel .behaviorToggle,
 .traitsPanel .behaviorToggleActive {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
-/* Light-blue body and darker border: the toolbars' values (.topTools). */
+/* Unselected: like an unselected Focus chip (.savedKeywordChip and its
+   label): white, neutral border, accent text. */
 .traitsPanel .behaviorIconBtn,
 .traitsPanel .behaviorToggle {
-  background: #edf5f9;
-  border-color: #b4d2df;
-  color: #3f7ea0;
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  color: var(--color-accent);
+}
+
+/* Selected: like a selected Focus chip (.chip): accent tint, accent border
+   and text. */
+.traitsPanel .behaviorIconBtnActive,
+.traitsPanel .behaviorToggleActive {
+  background: rgba(5, 55, 80, 0.1);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
 }
 
 /* The location pill to match. */
@@ -3545,9 +3566,9 @@
   cursor: default;
 }
 
-/* Keep the usual hover above the scoped colours. */
+/* Hover like an unselected Focus chip: just the accent border. */
 .traitsPanel .behaviorIconBtn:hover:not(:disabled),
 .traitsPanel .behaviorToggle:hover:not(:disabled) {
   border-color: var(--color-accent);
-  color: var(--color-text);
+  color: var(--color-accent);
 }

@@ -88,6 +88,12 @@
      variable instead of each class hardcoding its own px value, so this
      whole family can't drift out of sync with itself again. */
   --radius-control: 999px;
+
+  /* The default for pill-like choice objects (Setup's Type, Personality and
+     Behaviour buttons, the job's location pill, the Focus topic chips and
+     the saved Focus pool): between square-ish and a full pill. Use it for
+     any new pill of this kind. */
+  --radius-pill: 10px;
 }
 
 /* Base for every clickable button in the app. A CSS Modules class composes
