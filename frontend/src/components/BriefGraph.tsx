@@ -69,5 +69,5 @@ export default function BriefGraph({ map, focuses = [] }: { map: BriefMap; focus
     ]
   }, [map, focuses])
   // No zoom/fit/expand controls: the brief graph always fits its frame.
-  return <ColumnGraph columns={columns} node={BriefNode} nodeWidth={NODE_WIDTH} label="Brief graph" zoomControls={false} />
+  return <ColumnGraph columns={columns} node={BriefNode} nodeWidth={NODE_WIDTH} label="Brief graph" zoomControls={false} followEnd />
 }

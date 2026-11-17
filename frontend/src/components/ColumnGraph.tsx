@@ -50,6 +50,9 @@ interface Props<D extends Record<string, unknown>> {
   onNodeClick?: (id: string) => void
   // False drops the zoom/fit/scale buttons; the graph stays at 100%.
   zoomControls?: boolean
+  // True scrolls to the newest (rightmost) node when nodes change. Off for
+  // Setup's process graph, whose nodes are page navigation and must stay put.
+  followEnd?: boolean
 }
 
 function buildGraph<D extends Record<string, unknown>>(
@@ -96,7 +99,7 @@ export default function ColumnGraph<D extends Record<string, unknown>>(props: Pr
   )
 }
 
-function ColumnGraphInner<D extends Record<string, unknown>>({ columns, node, nodeWidth, colGap = 48, label, edgeClass, onNodeClick, zoomControls = true }: Props<D>) {
+function ColumnGraphInner<D extends Record<string, unknown>>({ columns, node, nodeWidth, colGap = 48, label, edgeClass, onNodeClick, zoomControls = true, followEnd = false }: Props<D>) {
   const nodeTypes = useMemo(() => ({ card: node }), [node])
   const [sizes, setSizes] = useState<Map<string, Size>>(() => new Map())
   const { nodes, edges } = useMemo(
@@ -157,6 +160,15 @@ function ColumnGraphInner<D extends Record<string, unknown>>({ columns, node, no
     const raf = requestAnimationFrame(fitToContent)
     return () => cancelAnimationFrame(raf)
   }, [initialized, nodes, sizeKey, fitToContent, flow, sizes])
+
+  // With followEnd: when a node is added or updated (or the fitted width
+  // changes with it), scroll to the end (right) once the new width has rendered.
+  useEffect(() => {
+    const scroller = scrollRef.current
+    if (!followEnd || !scroller || contentWidth === undefined) return
+    const raf = requestAnimationFrame(() => { scroller.scrollLeft = scroller.scrollWidth })
+    return () => cancelAnimationFrame(raf)
+  }, [columns, contentWidth, height, followEnd])
 
   const zoomBy = (factor: number) =>
     setUserZoom(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoomLevel * factor)))
