@@ -502,7 +502,7 @@ export default function Chat({ agentConfig: baseConfig, agentName, onReset, onNe
   // index, which is stable for the lifetime of one chat session's array.
   // Graph view is the default for every reply; this holds the ones switched to the log.
   const [logViewMessages, setLogViewMessages] = useState<Set<number>>(new Set())
-  // The "Or ask a question" box under the latest answer's Where to next.
+  // The "Answer or direct the Agent" box under the latest answer's Where to next.
   const [askText, setAskText] = useState('')
   const [caseFileMessages, setCaseFileMessages] = useState<Set<number>>(new Set())
   function toggleCaseFile(i: number) {
@@ -526,6 +526,10 @@ export default function Chat({ agentConfig: baseConfig, agentName, onReset, onNe
   // _delegation_rule_body iterates over it). Changing focus means going back
   // to Setup, not editing it mid-chat.
   const focusPool = agentConfig.keywords ?? []
+  // An image given as the Focus travels as a document named "Image: <file>".
+  const focusImages = (agentConfig.documents ?? [])
+    .filter(d => d.name.startsWith('Image: '))
+    .map(d => d.name.slice('Image: '.length))
 
   // Every worker agent in this conversation, once each, in the order they
   // were started. Shown in the tools strip ahead of the tools. A worker
@@ -1482,6 +1486,14 @@ export default function Chat({ agentConfig: baseConfig, agentName, onReset, onNe
               ))}
             </div>
           )}
+          {/* An image Focus has no keywords: its file name stands where they go. */}
+          {focusPool.length === 0 && focusImages.length > 0 && (
+            <div className={styles.headerKeywords}>
+              {focusImages.map(name => (
+                <span key={name} className={styles.headerChip} title="The image this job's Focus is">{name}</span>
+              ))}
+            </div>
+          )}
           {assets.length > 0 && (
             <div className={styles.headerAssets}>
               {assets.map((a, ai) => (
@@ -1699,10 +1711,10 @@ export default function Chat({ agentConfig: baseConfig, agentName, onReset, onNe
                 </div>
               )
             })()}
-            {msg.role === 'assistant' && msg.durationSeconds !== undefined && msg.nextOptions && msg.nextOptions.length > 0 && (
+            {msg.role === 'assistant' && msg.durationSeconds !== undefined && ((msg.nextOptions?.length ?? 0) > 0 || i === messages.length - 1) && (
               <div className={styles.nextOptions} role="group" aria-label="Routes to explore next">
-                <span className={styles.nextOptionsLabel}>Where to next</span>
-                {msg.nextOptions.map(option => (
+                {(msg.nextOptions?.length ?? 0) > 0 && <span className={styles.nextOptionsLabel}>Where to next</span>}
+                {(msg.nextOptions ?? []).map(option => (
                   <button
                     key={option}
                     type="button"
@@ -1726,7 +1738,7 @@ export default function Chat({ agentConfig: baseConfig, agentName, onReset, onNe
                       sendMessage(text, messages)
                     }}
                   >
-                    <label className={styles.nextOptionsLabel} htmlFor={`ask-${i}`}>Or ask a question</label>
+                    <label className={styles.nextOptionsLabel} htmlFor={`ask-${i}`}>Answer or direct the Agent</label>
                     <div className={styles.askRow}>
                       <input
                         id={`ask-${i}`}

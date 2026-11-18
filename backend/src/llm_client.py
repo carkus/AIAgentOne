@@ -268,6 +268,18 @@ def create_chat_completion(provider: str | None = None, model: str | None = None
             # rejected for this model.
             call_kwargs = {**kwargs}
             call_kwargs.setdefault("reasoning_effort", "low")
+        elif name == "cloudflare" and use_model and "qwen3" in use_model and (kwargs.get("max_tokens") or 0) <= 1000:
+            # Qwen3-30B thinks by default and ignores reasoning_effort, so a
+            # small-budget call (route suggestions, self-checks) spends every
+            # token thinking and returns no content. Its "/no_think" tag is
+            # the switch that works; big calls (design, replies) keep thinking.
+            msgs = list(kwargs.get("messages") or [])
+            for idx in range(len(msgs) - 1, -1, -1):
+                m = msgs[idx]
+                if isinstance(m, dict) and m.get("role") == "user" and isinstance(m.get("content"), str):
+                    msgs[idx] = {**m, "content": m["content"] + " /no_think"}
+                    call_kwargs = {**kwargs, "messages": msgs}
+                    break
         if name == "ollama":
             # Ollama-only: extra_body passes through to its native /api/chat
             # `options`, not part of the OpenAI-compat schema Gemini expects.

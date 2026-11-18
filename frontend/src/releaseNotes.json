@@ -1,6 +1,8 @@
 {
   "_about": "Changes since the last deploy go in \"unreleased\", each tagged kind fix/feature/breaking. On deploy, tools/release-notes/release.py turns them into the next release (newest first) and sets the version. See CLAUDE.md, Versioning.",
   "unreleased": [
+    {"kind": "fix", "title": "Where to next is back on Cloudflare", "text": "On Cloudflare's Qwen, short calls such as suggesting where to go next spent their whole allowance thinking and came back empty, so some replies ended without **Where to next**. Those calls now answer straight away. The box under the latest reply, now labelled **Answer or direct the Agent**, also shows even when there are no routes."},
+    {"kind": "fix", "title": "Image Focus shown on the job", "text": "A job whose Focus is an image shows the image's file name where the keywords go on a keyword job."},
     {"kind": "fix", "title": "Tidier brief spacing", "text": "The written brief starts at the top of its box, with a single blank line between the text and each subheading instead of large gaps."},
     {"kind": "fix", "title": "Image and document jobs start on their own", "text": "An agent whose Focus is an image or documents now starts work on the material as soon as the mission briefing is dismissed, as keyword jobs always did, instead of waiting for you to ask it something."},
     {"kind": "fix", "title": "Focus tabs look like tabs", "text": "The Focus step's **Keywords**, **Image** and **Document** choices are now drawn as tabs on a rule, with the chosen one outlined and open onto its content below, both a shade lighter than the step's background, instead of pills."},
