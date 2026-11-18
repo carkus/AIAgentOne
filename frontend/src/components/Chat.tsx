@@ -571,7 +571,18 @@ export default function Chat({ agentConfig: baseConfig, agentName, onReset, onNe
   useEffect(() => {
     if (autoSentRef.current || showBriefing) return
     const kws = focusPool
-    if (!kws?.length) return
+    if (!kws?.length) {
+      // An image or document Focus has no keywords; the material itself is
+      // the job, so start on it the same way rather than waiting for a
+      // question. (The backend puts its full text in the system prompt.)
+      const docs = agentConfig.documents ?? []
+      if (!docs.length) return
+      autoSentRef.current = true
+      const names = docs.map(d => `"${d.name}"`).join(', ')
+      const text = `Starting commission: work through the attached material (${names}) and report what you find.`
+      sendMessage(text, messages, undefined, text, true)
+      return
+    }
     autoSentRef.current = true
     // Deliberately says nothing about "search" or location: a specialty in
     // the pool might be a creative/image-generation task (e.g. "clown

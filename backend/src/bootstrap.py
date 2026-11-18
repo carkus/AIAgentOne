@@ -995,7 +995,9 @@ def _generate_agent_config_stream(
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta.content
-            if not delta:
+            # Cloudflare's Qwen stream can end with stray non-text deltas
+            # (an int, an empty list) after its reasoning chunks.
+            if not isinstance(delta, str) or not delta:
                 continue
             buffer += delta
 

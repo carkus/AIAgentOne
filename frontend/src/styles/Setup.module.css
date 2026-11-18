@@ -3604,27 +3604,67 @@
 
 /* The Focus step's Keywords / Image / Document tabs: AgentPool's filter
    pills, with the shared pill radius. */
+/* Classic tabs: a rule along the bottom that breaks under the chosen
+   tab, so it reads as open onto the content below. The rule is drawn by
+   the unchosen tabs and a filler, so no background has to match. */
 .focusTabs {
   display: flex;
-  gap: 0.25rem;
+}
+
+.focusTabs::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .focusTab,
 .focusTabActive {
-  border: none;
-  border-radius: var(--radius-pill);
+  border: 1px solid transparent;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: var(--radius-pill) var(--radius-pill) 0 0;
   cursor: pointer;
   font: inherit;
   font-size: var(--font-size-xs);
-  padding: 0.25rem 0.7rem;
+  padding: 0.35rem 0.9rem;
+  background: transparent;
 }
 
 .focusTab {
-  background: rgba(40, 75, 106, 0.08);
+  color: var(--color-muted);
+}
+
+.focusTab:hover:not(:disabled) {
   color: var(--color-text);
 }
 
 .focusTabActive {
-  background: var(--color-accent);
-  color: #fff;
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  border-bottom-color: transparent;
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+/* The chosen tab's content: same lighter surface as the tab, outlined
+   on the three sides the tab rule doesn't already draw. */
+.focusTabPanel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-top: none;
+  border-radius: 0 0 var(--radius-pill) var(--radius-pill);
+  /* Cancels .specialtiesRow's flex gap so the panel meets the tabs. */
+  margin-top: -0.4rem;
+  padding: 0 0.75rem 0.6rem;
+}
+
+/* Room above each tab's description, the panel's first line. */
+.focusTabPanel > .specialtiesHint:first-child {
+  padding-top: 0.5rem;
+}
+
+/* The Deploy toolbar under the process graph, at the right of the
+   Build your agent box. */
+.resetToolbar.graphToolbar {
+  width: fit-content;
+  margin: 1rem 0 0 auto;
 }

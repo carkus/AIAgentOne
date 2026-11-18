@@ -395,8 +395,23 @@ function lastChatLine(messages: SavedChatMessage[]): string | null {
 // brief without dot points (the template fallback, older briefs) is shown
 // as it is.
 function bigBullets(text: string): React.ReactNode {
-  const lines = text.split('\n')
-  const pointy = lines.some(l => l.startsWith('•'))
+  // Tidy the model's spacing: no blank lines at the top or bottom, runs of
+  // blank lines collapsed to one, and exactly one blank line before each
+  // subheading (so text starts at the top of the box).
+  const raw = text.replace(/\r/g, '').split('\n').map(l => l.trimEnd())
+  const pointy = raw.some(l => l.trimStart().startsWith('•'))
+  const lines: string[] = []
+  for (const l of raw) {
+    const line = l.trimStart().startsWith('•') ? l.trimStart() : l
+    const isHeading = pointy && line.trim() !== '' && !line.startsWith('•')
+    if (line.trim() === '') {
+      if (lines.length && lines[lines.length - 1] !== '') lines.push('')
+      continue
+    }
+    if (isHeading && lines.length && lines[lines.length - 1] !== '') lines.push('')
+    lines.push(line)
+  }
+  while (lines.length && lines[lines.length - 1] === '') lines.pop()
   return lines.map((line, i) => {
     const nl = i < lines.length - 1 ? '\n' : ''
     if (line.startsWith('•')) {
@@ -2072,6 +2087,75 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                 }}
               />
             )}
+            {/* The Deploy toolbar, under the graph in the Build your agent box. */}
+              <div className={`${styles.resetToolbar} ${styles.graphToolbar}`}>
+                {briefOutputs.length > 0 && (
+                  // Output buttons, grouped on their own background.
+                  <div className={styles.toolbarOutputs} role="group" aria-label="Outputs">
+                    {briefOutputs.map(s => {
+                      const built = briefRelics.some(r => r.kind === s.kind)
+                      const label = RELIC_LABELS[s.kind]
+                      const title = briefRelicBusy === s.kind
+                        ? `Building ${label}…`
+                        : !briefReady
+                          ? `${label}: available once the Brief is generated`
+                          : `${built ? 'Open' : 'Build'} ${label}${s.suggested ? ` (suggested): ${s.reason}` : ''}`
+                      return (
+                        <button
+                          key={s.kind}
+                          {...toolbarDrag.dragProps(s.kind)}
+                          type="button"
+                          className={`${styles.toolbarIconBtn} ${styles.toolbarOutputBtn} ${s.suggested ? styles.toolbarOutputSuggested : ''} ${briefRelicBusy === s.kind ? styles.toolbarIconBusy : ''}`}
+                          title={title}
+                          aria-label={`${built ? 'Open' : 'Build'} ${label}${s.suggested ? ' (suggested)' : ''}`}
+                          disabled={outputsDisabled}
+                          onClick={() => handleBriefRelic(s)}
+                        >
+                          <RelicIcon kind={s.kind} />
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+                {briefOutputs.length > 0 && (
+                  // Narrow screens: stands in for the outputs group above
+                  // (CSS shows one or the other).
+                  <button
+                    type="button"
+                    className={`${styles.toolbarIconBtn} ${styles.toolbarOutputBtn} ${styles.toolbarToolsBtn} ${briefRelicBusy ? styles.toolbarIconBusy : ''}`}
+                    title={briefRelicBusy ? `Building ${RELIC_LABELS[briefRelicBusy]}…` : 'Tools'}
+                    aria-label="Tools"
+                    aria-haspopup="dialog"
+                    disabled={bootstrapping || briefRelicBusy !== null}
+                    onClick={() => setToolsOpen(true)}
+                  >
+                    <ToolsIcon />
+                  </button>
+                )}
+                {/* Deploy ends the toolbar: everything for this agent in one bar. */}
+                <button
+                  type="submit"
+                  form="agentSetupForm"
+                  className={`${styles.profileCommissionBtn} ${styles.toolbarDeploy} ${!focusReady ? styles.profileCommissionBtnBlocked : ''}`}
+                  disabled={bootstrapping}
+                  aria-disabled={!focusReady}
+                  title={reusableConfig
+                    ? 'Deploy: this agent is already built from these steps, so it opens straight away'
+                    : 'Deploy: build the agent from these steps and start the job'}
+                >
+                  {bootstrapping ? 'Configuring…' : 'Deploy >'}
+                </button>
+                {bootstrapping && (
+                  <button
+                    type="button"
+                    className={styles.bootstrapStopBtn}
+                    onClick={stopBootstrap}
+                    title="Cancel this in-progress bootstrap"
+                  >
+                    Stop
+                  </button>
+                )}
+              </div>
           </div>
 
           {/* The step's working panel. While deploying, the shield covers
@@ -2288,6 +2372,8 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                   ))}
                 </div>
               )}
+              {specialtiesOpen && (
+              <div className={styles.focusTabPanel} role="tabpanel">
               {specialtiesOpen && focusMode === 'keywords' && (
                 <p className={styles.specialtiesHint}>
                   {keywords.length >= MAX_SPECIALTIES
@@ -2532,6 +2618,8 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                   </p>
                 </div>
               ))}
+              </div>
+              )}
             </div>
 
             {/* The Saved Focus pool from the Agent Dossier, so focus can be
@@ -2849,74 +2937,6 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
           {commissionHint && (
             <p className={styles.commissionHint} role="status">{commissionHint}</p>
           )}
-          <div className={styles.resetToolbar}>
-            {briefOutputs.length > 0 && (
-              // Output buttons, grouped on their own background.
-              <div className={styles.toolbarOutputs} role="group" aria-label="Outputs">
-                {briefOutputs.map(s => {
-                  const built = briefRelics.some(r => r.kind === s.kind)
-                  const label = RELIC_LABELS[s.kind]
-                  const title = briefRelicBusy === s.kind
-                    ? `Building ${label}…`
-                    : !briefReady
-                      ? `${label}: available once the Brief is generated`
-                      : `${built ? 'Open' : 'Build'} ${label}${s.suggested ? ` (suggested): ${s.reason}` : ''}`
-                  return (
-                    <button
-                      key={s.kind}
-                      {...toolbarDrag.dragProps(s.kind)}
-                      type="button"
-                      className={`${styles.toolbarIconBtn} ${styles.toolbarOutputBtn} ${s.suggested ? styles.toolbarOutputSuggested : ''} ${briefRelicBusy === s.kind ? styles.toolbarIconBusy : ''}`}
-                      title={title}
-                      aria-label={`${built ? 'Open' : 'Build'} ${label}${s.suggested ? ' (suggested)' : ''}`}
-                      disabled={outputsDisabled}
-                      onClick={() => handleBriefRelic(s)}
-                    >
-                      <RelicIcon kind={s.kind} />
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-            {briefOutputs.length > 0 && (
-              // Narrow screens: stands in for the outputs group above
-              // (CSS shows one or the other).
-              <button
-                type="button"
-                className={`${styles.toolbarIconBtn} ${styles.toolbarOutputBtn} ${styles.toolbarToolsBtn} ${briefRelicBusy ? styles.toolbarIconBusy : ''}`}
-                title={briefRelicBusy ? `Building ${RELIC_LABELS[briefRelicBusy]}…` : 'Tools'}
-                aria-label="Tools"
-                aria-haspopup="dialog"
-                disabled={bootstrapping || briefRelicBusy !== null}
-                onClick={() => setToolsOpen(true)}
-              >
-                <ToolsIcon />
-              </button>
-            )}
-            {/* Deploy ends the toolbar: everything for this agent in one bar. */}
-            <button
-              type="submit"
-              form="agentSetupForm"
-              className={`${styles.profileCommissionBtn} ${styles.toolbarDeploy} ${!focusReady ? styles.profileCommissionBtnBlocked : ''}`}
-              disabled={bootstrapping}
-              aria-disabled={!focusReady}
-              title={reusableConfig
-                ? 'Deploy: this agent is already built from these steps, so it opens straight away'
-                : 'Deploy: build the agent from these steps and start the job'}
-            >
-              {bootstrapping ? 'Configuring…' : 'Deploy >'}
-            </button>
-            {bootstrapping && (
-              <button
-                type="button"
-                className={styles.bootstrapStopBtn}
-                onClick={stopBootstrap}
-                title="Cancel this in-progress bootstrap"
-              >
-                Stop
-              </button>
-            )}
-          </div>
 
           </div>
         </div>
