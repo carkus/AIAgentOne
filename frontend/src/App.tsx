@@ -4,6 +4,7 @@ import AdvancedSetup from './components/AdvancedSetup'
 import Chat from './components/Chat'
 import SplashScreen from './components/SplashScreen'
 import MobileNotice from './components/MobileNotice'
+import GatewayBanner from './components/GatewayBanner'
 import ReleaseNotes from './components/ReleaseNotes'
 import type { AgentConfig, SavedChat } from './types'
 import { SURNAMES } from './surnames'
@@ -168,6 +169,7 @@ export default function App() {
 
   return (
     <div style={styles.root}>
+      <GatewayBanner />
       {releaseNotes ? (
         <ReleaseNotes />
       ) : phase === 'restoring' ? null : phase === 'splash' ? (

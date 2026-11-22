@@ -507,6 +507,28 @@ export async function fetchWebSearchStatus(): Promise<{ active: string | null; p
   }
 }
 
+/** The ChattyPrayers AI gateway as the backend last saw it. `configured` is
+ * false when the backend calls providers directly; `ok` is null until the
+ * first check. Null when the request itself failed. */
+export interface GatewayStatus {
+  configured: boolean;
+  ok: boolean | null;
+  error: string | null;
+  checked_at: string | null;
+  provider: string | null;
+  model: string | null;
+}
+
+export async function fetchGatewayStatus(): Promise<GatewayStatus | null> {
+  try {
+    const res = await fetch(`${API_URL}/gateway-status`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
 export interface AiMethodsStatus {
   regenerate: boolean;
   pdf: string;

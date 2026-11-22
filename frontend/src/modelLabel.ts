@@ -9,8 +9,10 @@ import type { LlmProvider, ModelAttempt, TraceSpan } from './types'
 export const GEMINI_MODEL_NAME = 'gemini-3.6-flash'
 export const DEFAULT_OLLAMA_MODEL = 'qwen3:8b'
 // Mirrors llm_client.CLOUDFLARE_MODELS[0] (Workers AI's hosted Qwen).
-// 30B-A3B since 2026-11-17: 3-5 s a call where qwen3.8-27b took 26-52 s.
-export const DEFAULT_CLOUDFLARE_MODEL = '@cf/qwen/qwen3-30b-a3b-fp8'
+// Back on qwen3.8-27b: Cloudflare retired qwen3-30b-a3b-fp8 on 2026-11-20
+// (calls now return 410).
+export const DEFAULT_CLOUDFLARE_MODEL = '@cf/qwen/qwen3.8-27b'
+const RETIRED_CLOUDFLARE_MODELS = ['@cf/qwen/qwen3-30b-a3b-fp8']
 
 // "@cf/qwen/qwen3.8-27b" -> "qwen3.8-27b"
 export function shortCloudflareModel(model: string): string {
@@ -44,6 +46,11 @@ export function storedCloudflareModel(): string {
       if (localStorage.getItem('aiagent_cloudflare_model') === '@cf/qwen/qwen3.8-27b') {
         localStorage.setItem('aiagent_cloudflare_model', DEFAULT_CLOUDFLARE_MODEL)
       }
+    }
+    // A saved model Cloudflare has since retired fails every call, so it is
+    // always replaced, not just once.
+    if (RETIRED_CLOUDFLARE_MODELS.includes(localStorage.getItem('aiagent_cloudflare_model') ?? '')) {
+      localStorage.setItem('aiagent_cloudflare_model', DEFAULT_CLOUDFLARE_MODEL)
     }
     return localStorage.getItem('aiagent_cloudflare_model') || DEFAULT_CLOUDFLARE_MODEL
   } catch {

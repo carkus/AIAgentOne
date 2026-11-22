@@ -583,7 +583,7 @@ export default function Chat({ agentConfig: baseConfig, agentName, onReset, onNe
       if (!docs.length) return
       autoSentRef.current = true
       const names = docs.map(d => `"${d.name}"`).join(', ')
-      const text = `Starting commission: work through the attached material (${names}) and report what you find.`
+      const text = `Starting commission: work out what the attached material (${names}) is about, research that subject with web search beyond what the material shows, and report what you find.`
       sendMessage(text, messages, undefined, text, true)
       return
     }

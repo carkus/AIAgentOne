@@ -1,30 +1,119 @@
 {
   "_about": "Changes since the last deploy go in \"unreleased\", each tagged kind fix/feature/breaking. On deploy, tools/release-notes/release.py turns them into the next release (newest first) and sets the version. See CLAUDE.md, Versioning.",
   "unreleased": [
-    {"kind": "fix", "title": "Where to next is back on Cloudflare", "text": "On Cloudflare's Qwen, short calls such as suggesting where to go next spent their whole allowance thinking and came back empty, so some replies ended without **Where to next**. Those calls now answer straight away. The box under the latest reply, now labelled **Answer or direct the Agent**, also shows even when there are no routes."},
-    {"kind": "fix", "title": "Image Focus shown on the job", "text": "A job whose Focus is an image shows the image's file name where the keywords go on a keyword job."},
-    {"kind": "fix", "title": "Tidier brief spacing", "text": "The written brief starts at the top of its box, with a single blank line between the text and each subheading instead of large gaps."},
-    {"kind": "fix", "title": "Image and document jobs start on their own", "text": "An agent whose Focus is an image or documents now starts work on the material as soon as the mission briefing is dismissed, as keyword jobs always did, instead of waiting for you to ask it something."},
-    {"kind": "fix", "title": "Focus tabs look like tabs", "text": "The Focus step's **Keywords**, **Image** and **Document** choices are now drawn as tabs on a rule, with the chosen one outlined and open onto its content below, both a shade lighter than the step's background, instead of pills."},
-    {"kind": "fix", "title": "Agent design works on Cloudflare again", "text": "Designing an agent on Cloudflare's Qwen could fail with **Bootstrap failed: can only concatenate str (not \"int\") to str**, because the model's reply sometimes ends with stray non-text pieces. Those are now skipped."},
-    {"kind": "fix", "title": "Deploy toolbar moved", "text": "The Deploy toolbar now sits under the flowchart in the **Build your agent** box, at its right."},
-    {"kind": "feature", "title": "Focus on keywords, an image or documents", "text": "The Focus step has **Keywords**, **Image** and **Document** tabs, and the chosen tab alone is the job. An image is read once by a vision model and the agent works from that reading; up to three PDF, Word, text or CSV documents are read and analysed on every turn, quoted and compared by name."},
-    {"kind": "fix", "title": "Clearer location tickbox", "text": "The job's location pill is no longer faded when location isn't factored in. When it is ticked, the pill is tinted with a dark-blue border, like a selected Character pill."},
-    {"kind": "fix", "title": "Image jobs no longer overflow the model", "text": "After an agent made an image, the next step sent the whole image to the model as text, which overflowed Cloudflare's Qwen and pushed the job onto slow local Ollama. The model now sees a short reference instead, and the image is put back into the reply."},
-    {"kind": "fix", "title": "Full browser storage no longer breaks a job", "text": "When the browser's storage was full, saving a job crashed the job screen. Now a job that doesn't fit is saved without its generated images, and if it still doesn't fit it isn't saved; your other saved jobs are never removed to make room."},
-    {"kind": "feature", "title": "Task topics work on the subject", "text": "A Focus topic that is something to do or make, like **Create Images**, is now applied to the other topics instead of treated as a subject of its own. **Augustus** with **Create Images** researches Augustus and makes images of him, in the way the Character works, rather than looking up a company called Create Images."},
-    {"kind": "fix", "title": "Quieter brief progress", "text": "The brief's progress line (such as **Writing the brief in one go**) is a little smaller, in the same uppercase lettering as the section labels, with a smaller spinner."},
-    {"kind": "fix", "title": "Graphs follow the newest step", "text": "When a step is added or updated in the brief graph, it scrolls to the right so the newest step is in view. Setup's process graph stays where it is, since its steps are how you move between pages."},
-    {"kind": "feature", "title": "Open a saved file from the reply", "text": "When an agent saves a file and names it in its reply, the file name is now a button that opens the file, instead of a path on the server."},
-    {"kind": "feature", "title": "Files you ask for are built for you", "text": "Asking an agent to save, export or download something (a template, document, spreadsheet) now builds a real file in the best format straight away, ready to preview and download. Agents no longer write their own save tool, which could report a file as saved when it was empty."},
-    {"kind": "fix", "title": "Character pills match the Focus topics", "text": "The Type, Personality and Behaviour pills on the Character step now look like the Focus topics: unselected ones white, selected ones tinted with a dark-blue border, all with the same rounded corners."},
-    {"kind": "feature", "title": "Location per job", "text": "The location now sits under Type on the Character step. Each job starts with your location from Settings, can be given its own on the map, and keeps it when saved. A round tickbox beside it decides whether the agent uses it at all."},
-    {"kind": "feature", "title": "Model and Settings at the end of the header", "text": "The model and web search lines sit in a column at the right end of the agent header, in smaller plain text, with a Settings button beside them the same size as the toolbar buttons. The deployment page now has Settings too: a model, location or search change there applies from the agent's next reply."},
-    {"kind": "fix", "title": "Sub-headings in replies are dark blue", "text": "Third-level headings in an agent's reply (e.g. \"Key Features of This Template\") were near-black; they now use the same dark blue as the other headings."},
-    {"kind": "fix", "title": "A briefer brief", "text": "The written brief in Setup is now three short groups of dot points instead of three paragraphs, each under a heading written for that agent: what the topics add up to, how its character shapes the work, and what it will do. The bullets are larger than the text."},
-    {"kind": "feature", "title": "Brief choices you can click", "text": "When the brief spots a tension or gap in your Focus, it says how the agent will handle it and offers buttons to change course: **Lead with** a topic (the agent then frames the job around it), **Drop** one, or **Add** one. The brief no longer asks you to clarify things you can't type."}
+    {"kind": "fix", "title": "Cloudflare model back to Qwen 3.8", "text": "Cloudflare retired the faster **qwen3-30b-a3b** model, so every call to it failed. Agents on Cloudflare now use **qwen3.8-27b** again, a saved choice of the old model is switched over, and short calls such as **Where to next** answer without spending their allowance thinking."},
+    {"kind": "feature", "title": "AI gateway with a fallback notice", "text": "Model calls can now go through a shared AI gateway that picks the provider. If the gateway is down, calls carry on using the free providers, and a dismissible banner at the top of the page says so."}
   ],
   "releases": [
+    {
+      "version": "0.12.0",
+      "date": "18 November 2026",
+      "title": "8 new features, 15 fixes",
+      "groups": [
+        {
+          "title": "New",
+          "fixes": [
+            {
+              "title": "Image and document jobs research with a team",
+              "text": "A job whose Focus is an image or documents now works like a keyword job: the agent splits the research across 2 or more workers, each shown with its own card, searches the web beyond what the material shows, and writes a report from what they find, instead of answering from the material and general knowledge alone."
+            },
+            {
+              "title": "Focus on keywords, an image or documents",
+              "text": "The Focus step has **Keywords**, **Image** and **Document** tabs, and the chosen tab alone is the job. An image is read once by a vision model and the agent works from that reading; up to three PDF, Word, text or CSV documents are read and analysed on every turn, quoted and compared by name."
+            },
+            {
+              "title": "Task topics work on the subject",
+              "text": "A Focus topic that is something to do or make, like **Create Images**, is now applied to the other topics instead of treated as a subject of its own. **Augustus** with **Create Images** researches Augustus and makes images of him, in the way the Character works, rather than looking up a company called Create Images."
+            },
+            {
+              "title": "Open a saved file from the reply",
+              "text": "When an agent saves a file and names it in its reply, the file name is now a button that opens the file, instead of a path on the server."
+            },
+            {
+              "title": "Files you ask for are built for you",
+              "text": "Asking an agent to save, export or download something (a template, document, spreadsheet) now builds a real file in the best format straight away, ready to preview and download. Agents no longer write their own save tool, which could report a file as saved when it was empty."
+            },
+            {
+              "title": "Location per job",
+              "text": "The location now sits under Type on the Character step. Each job starts with your location from Settings, can be given its own on the map, and keeps it when saved. A round tickbox beside it decides whether the agent uses it at all."
+            },
+            {
+              "title": "Model and Settings at the end of the header",
+              "text": "The model and web search lines sit in a column at the right end of the agent header, in smaller plain text, with a Settings button beside them the same size as the toolbar buttons. The deployment page now has Settings too: a model, location or search change there applies from the agent's next reply."
+            },
+            {
+              "title": "Brief choices you can click",
+              "text": "When the brief spots a tension or gap in your Focus, it says how the agent will handle it and offers buttons to change course: **Lead with** a topic (the agent then frames the job around it), **Drop** one, or **Add** one. The brief no longer asks you to clarify things you can't type."
+            }
+          ]
+        },
+        {
+          "title": "Fixes",
+          "fixes": [
+            {
+              "title": "Where to next is back on Cloudflare",
+              "text": "On Cloudflare's Qwen, short calls such as suggesting where to go next spent their whole allowance thinking and came back empty, so some replies ended without **Where to next**. Those calls now answer straight away. The box under the latest reply, now labelled **Answer or direct the Agent**, also shows even when there are no routes."
+            },
+            {
+              "title": "Image Focus shown on the job",
+              "text": "A job whose Focus is an image shows the image's file name where the keywords go on a keyword job."
+            },
+            {
+              "title": "Tidier brief spacing",
+              "text": "The written brief starts at the top of its box, with a single blank line between the text and each subheading instead of large gaps."
+            },
+            {
+              "title": "Image and document jobs start on their own",
+              "text": "An agent whose Focus is an image or documents now starts work on the material as soon as the mission briefing is dismissed, as keyword jobs always did, instead of waiting for you to ask it something."
+            },
+            {
+              "title": "Focus tabs look like tabs",
+              "text": "The Focus step's **Keywords**, **Image** and **Document** choices are now drawn as tabs on a rule, with the chosen one outlined and open onto its content below, both a shade lighter than the step's background, instead of pills."
+            },
+            {
+              "title": "Agent design works on Cloudflare again",
+              "text": "Designing an agent on Cloudflare's Qwen could fail with **Bootstrap failed: can only concatenate str (not \"int\") to str**, because the model's reply sometimes ends with stray non-text pieces. Those are now skipped."
+            },
+            {
+              "title": "Deploy toolbar moved",
+              "text": "The Deploy toolbar now sits under the flowchart in the **Build your agent** box, at its right."
+            },
+            {
+              "title": "Clearer location tickbox",
+              "text": "The job's location pill is no longer faded when location isn't factored in. When it is ticked, the pill is tinted with a dark-blue border, like a selected Character pill."
+            },
+            {
+              "title": "Image jobs no longer overflow the model",
+              "text": "After an agent made an image, the next step sent the whole image to the model as text, which overflowed Cloudflare's Qwen and pushed the job onto slow local Ollama. The model now sees a short reference instead, and the image is put back into the reply."
+            },
+            {
+              "title": "Full browser storage no longer breaks a job",
+              "text": "When the browser's storage was full, saving a job crashed the job screen. Now a job that doesn't fit is saved without its generated images, and if it still doesn't fit it isn't saved; your other saved jobs are never removed to make room."
+            },
+            {
+              "title": "Quieter brief progress",
+              "text": "The brief's progress line (such as **Writing the brief in one go**) is a little smaller, in the same uppercase lettering as the section labels, with a smaller spinner."
+            },
+            {
+              "title": "Graphs follow the newest step",
+              "text": "When a step is added or updated in the brief graph, it scrolls to the right so the newest step is in view. Setup's process graph stays where it is, since its steps are how you move between pages."
+            },
+            {
+              "title": "Character pills match the Focus topics",
+              "text": "The Type, Personality and Behaviour pills on the Character step now look like the Focus topics: unselected ones white, selected ones tinted with a dark-blue border, all with the same rounded corners."
+            },
+            {
+              "title": "Sub-headings in replies are dark blue",
+              "text": "Third-level headings in an agent's reply (e.g. \"Key Features of This Template\") were near-black; they now use the same dark blue as the other headings."
+            },
+            {
+              "title": "A briefer brief",
+              "text": "The written brief in Setup is now three short groups of dot points instead of three paragraphs, each under a heading written for that agent: what the topics add up to, how its character shapes the work, and what it will do. The bullets are larger than the text."
+            }
+          ]
+        }
+      ]
+    },
     {
       "version": "0.11.0",
       "date": "17 November 2026",

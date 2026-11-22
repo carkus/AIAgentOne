@@ -29,6 +29,18 @@ Env vars:
                      providers the droplet does (production parity)
   LLM_PROVIDER     - "gemini", "cloudflare" or "ollama" to force a single provider instead of
                      cascading (e.g. LLM_PROVIDER=ollama for offline/no-cost dev)
+  CHATTY_GATEWAY_URL - the ChattyPrayers AI gateway (e.g. http://localhost:5131 or
+                     https://<gateway host>). When set, chat calls go through its
+                     OpenAI-compatible endpoint first; the gateway picks the
+                     provider (Cloudflare first by default) and counts the call on
+                     its dashboard. If it is unreachable or errors, calls fall back
+                     to the direct free providers below (local Ollama, then
+                     Workers AI) and gateway_status() reports the problem.
+                     Unset = the direct cascade only, as before.
+  CHATTY_GATEWAY_KEY - this app's Gateway:ApiKeys key. Not needed against a
+                     gateway running locally in Development.
+  CHATTY_GATEWAY_POLICY - gateway policy when no provider is chosen (default
+                     "cloudflare"; also "free", "auto", "quality")
 """
 import logging
 import os
@@ -71,10 +83,10 @@ OLLAMA_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "8192"))
 CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
 CLOUDFLARE_MODELS = [
     m.strip() for m in os.environ.get(
-        "CLOUDFLARE_MODELS", "@cf/qwen/qwen3-30b-a3b-fp8,@cf/qwen/qwen3.8-27b"
+        "CLOUDFLARE_MODELS", "@cf/qwen/qwen3.8-27b"
     ).split(",") if m.strip()
 ]
-CLOUDFLARE_MODEL = CLOUDFLARE_MODELS[0] if CLOUDFLARE_MODELS else "@cf/qwen/qwen3-30b-a3b-fp8"
+CLOUDFLARE_MODEL = CLOUDFLARE_MODELS[0] if CLOUDFLARE_MODELS else "@cf/qwen/qwen3.8-27b"
 
 
 def ollama_enabled() -> bool:
@@ -171,6 +183,117 @@ _ollama_client = OpenAI(
     base_url=OLLAMA_BASE_URL,
 )
 
+# --- ChattyPrayers AI gateway -------------------------------------------------
+GATEWAY_URL = os.environ.get("CHATTY_GATEWAY_URL", "").strip().rstrip("/")
+GATEWAY_POLICY = os.environ.get("CHATTY_GATEWAY_POLICY", "cloudflare").strip() or "cloudflare"
+# The gateway runs its own cascade (several providers, each with its own
+# timeout), so the overall allowance is long; connecting is not, so an
+# unreachable gateway falls back within seconds.
+GATEWAY_TIMEOUT_SECONDS = float(os.environ.get("CHATTY_GATEWAY_TIMEOUT_SECONDS", "300"))
+# After the gateway fails, go direct for this long before trying it again, so
+# every call during an outage doesn't pay a failed round trip first.
+_GATEWAY_RETRY_S = 60
+_gateway_client = None
+if GATEWAY_URL:
+    import httpx
+    _gateway_client = OpenAI(
+        api_key=os.environ.get("CHATTY_GATEWAY_KEY") or "local",
+        base_url=f"{GATEWAY_URL}/v1/openai",
+        default_headers={"X-App": "AgentOne"},
+        timeout=httpx.Timeout(GATEWAY_TIMEOUT_SECONDS, connect=5.0),
+        max_retries=0,
+    )
+_gateway_state = {"ok": None, "error": None, "checked_at": None, "provider": None, "model": None}
+_gateway_skip_until = 0.0
+
+
+def gateway_configured() -> bool:
+    return _gateway_client is not None
+
+
+def gateway_status() -> dict:
+    """For the UI banner: is the gateway in use, and did its last call work?
+    ok is None until the first call (or a check_gateway() ping)."""
+    return {"configured": gateway_configured(), "url": GATEWAY_URL or None, **_gateway_state}
+
+
+def check_gateway() -> dict:
+    """Ping the gateway's /health (free: touches no model) and update the status."""
+    if not gateway_configured():
+        return gateway_status()
+    try:
+        requests.get(f"{GATEWAY_URL}/health", timeout=3).raise_for_status()
+        # Reachable clears "unreachable", but not a bad key or failing
+        # providers: only a real call can show those are fixed.
+        if _gateway_state["ok"] is None or (_gateway_state["error"] or "").startswith("unreachable"):
+            _set_gateway(True, None)
+    except Exception as e:
+        logger.info("AI gateway health check failed: %s", e)
+        _set_gateway(False, "unreachable")
+    return gateway_status()
+
+
+def _set_gateway(ok: bool, error: str | None, provider: str | None = None, model: str | None = None) -> None:
+    import datetime
+    import time
+    global _gateway_skip_until
+    _gateway_state.update(ok=ok, error=error, checked_at=datetime.datetime.now(datetime.timezone.utc).isoformat())
+    if provider:
+        _gateway_state.update(provider=provider, model=model)
+    _gateway_skip_until = 0.0 if ok else time.time() + _GATEWAY_RETRY_S
+
+
+def _gateway_error_text(e: Exception) -> str:
+    status = getattr(e, "status_code", None)
+    if status == 401:
+        return "rejected the API key (set CHATTY_GATEWAY_KEY)"
+    if status == 502:
+        return "is up, but all of its providers failed"
+    if status:
+        return f"returned {status}"
+    return f"unreachable ({type(e).__name__})"
+
+
+def _try_gateway(forced: str, model: str | None, kwargs: dict, _meta, trace_kind, trace_label, streamed):
+    """One call through the gateway. Returns the response, or None to go direct."""
+    import time
+    if not gateway_configured() or time.time() < _gateway_skip_until:
+        return None
+    policy = forced if forced in ("gemini", "cloudflare", "ollama") else GATEWAY_POLICY
+    call_kwargs = dict(kwargs)
+    if model:
+        is_cf = model.startswith("@cf/")
+        # Same rule as the direct cascade: a model only applies to its own provider.
+        if (forced == "cloudflare" and is_cf) or (forced == "ollama" and not is_cf) or not forced:
+            call_kwargs["extra_body"] = {**kwargs.get("extra_body", {}), "gateway_model": model}
+    started = run_trace.now_ms()
+    try:
+        raw = _gateway_client.chat.completions.with_raw_response.create(model=policy, **call_kwargs)
+        response = raw.parse()
+    except Exception as e:
+        reason = _gateway_error_text(e)
+        logger.warning("AI gateway %s: %s; going direct to local providers", reason, e)
+        _set_gateway(False, reason)
+        run_trace.record(trace_kind, trace_label, started, status="error", provider="gateway",
+                         model=policy, detail=str(e)[:300])
+        if _meta is not None:
+            _meta.setdefault("failed", []).append({"provider": "gateway", "model": policy})
+        return None
+    used = (raw.headers.get("x-gateway-provider") or "gateway").lower()
+    used_model = raw.headers.get("x-gateway-model") or policy
+    _set_gateway(True, None, used, used_model)
+    if not streamed:
+        usage = getattr(response, "usage", None)
+        run_trace.record(
+            trace_kind, trace_label, started, provider=used, model=used_model,
+            input_tokens=getattr(usage, "prompt_tokens", None),
+            output_tokens=getattr(usage, "completion_tokens", None),
+        )
+    if _meta is not None:
+        _meta["used"] = {"provider": used, "model": used_model, "via": "gateway"}
+    return response
+
+
 # (provider name, client, model) in cascade priority order
 _PROVIDERS = [
     ("gemini", _gemini_client, GEMINI_MODEL),
@@ -245,6 +368,16 @@ def create_chat_completion(provider: str | None = None, model: str | None = None
         providers = [p for p in _PROVIDERS if p[0] in ("ollama", "cloudflare")]
         providers.sort(key=lambda p: p[0] != "ollama")
 
+    if gateway_configured():
+        response = _try_gateway(forced, model, kwargs, _meta, trace_kind, trace_label, streamed)
+        if response is not None:
+            return response
+        # Gateway down or failing: fall back to the free providers only (local
+        # Ollama, then Workers AI), never straight to a paid one.
+        if ollama_enabled() or cloudflare_configured():
+            providers = [p for p in _PROVIDERS if p[0] in ("ollama", "cloudflare")]
+            providers.sort(key=lambda p: p[0] != "ollama")
+
     last_error = None
     for name, client, default_model in providers:
         if name == "gemini" and not gemini_available():
@@ -267,7 +400,15 @@ def create_chat_completion(provider: str | None = None, model: str | None = None
             # xhigh by default (slow, burns the free allowance); "none" is
             # rejected for this model.
             call_kwargs = {**kwargs}
-            call_kwargs.setdefault("reasoning_effort", "low")
+            if 0 < (kwargs.get("max_tokens") or 0) <= 1000 and "reasoning_effort" not in kwargs:
+                # Even "low" spends a small budget entirely on reasoning and
+                # returns no content; this switches thinking off (checked live
+                # 2026-11-23). Big calls (design, replies) keep reasoning low.
+                extra_body = {**kwargs.get("extra_body", {})}
+                extra_body.setdefault("chat_template_kwargs", {"enable_thinking": False})
+                call_kwargs["extra_body"] = extra_body
+            else:
+                call_kwargs.setdefault("reasoning_effort", "low")
         elif name == "cloudflare" and use_model and "qwen3" in use_model and (kwargs.get("max_tokens") or 0) <= 1000:
             # Qwen3-30B thinks by default and ignores reasoning_effort, so a
             # small-budget call (route suggestions, self-checks) spends every

@@ -42,7 +42,7 @@ from brief import generate_brief, generate_brief_map, generate_brief_stream, pro
 from focus_insights import check_focus
 from recap import generate_recap
 from relic import KINDS, generate_relic
-from llm_client import list_ollama_models, GEMINI_MODEL, CLOUDFLARE_MODELS, cloudflare_configured
+from llm_client import list_ollama_models, GEMINI_MODEL, CLOUDFLARE_MODELS, cloudflare_configured, check_gateway
 import bandit
 import rate_limit
 import saved_searches
@@ -115,6 +115,15 @@ def validate_config_route():
         return jsonify({"error": "agent_config is required"}), 400
     config, errors = validate_config(agent_config)
     return jsonify({"config": config, "errors": errors})
+
+
+@app.route("/gateway-status", methods=["GET", "OPTIONS"])
+def gateway_status_route():
+    # Feeds the UI banner when the ChattyPrayers AI gateway is configured but
+    # unreachable or failing (calls are then served by local providers).
+    if request.method == "OPTIONS":
+        return "", 204
+    return jsonify(check_gateway())
 
 
 @app.route("/models", methods=["GET", "OPTIONS"])

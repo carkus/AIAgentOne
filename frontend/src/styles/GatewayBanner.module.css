@@ -1,0 +1,27 @@
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 16px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--color-text);
+  background: color-mix(in srgb, #d97706 18%, var(--color-surface));
+  border-bottom: 1px solid color-mix(in srgb, #d97706 45%, var(--color-border));
+}
+
+.close {
+  flex: none;
+  border: none;
+  background: transparent;
+  color: var(--color-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.close:hover {
+  color: var(--color-text);
+}
