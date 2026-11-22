@@ -1,10 +1,32 @@
 {
   "_about": "Changes since the last deploy go in \"unreleased\", each tagged kind fix/feature/breaking. On deploy, tools/release-notes/release.py turns them into the next release (newest first) and sets the version. See CLAUDE.md, Versioning.",
-  "unreleased": [
-    {"kind": "fix", "title": "Cloudflare model back to Qwen 3.8", "text": "Cloudflare retired the faster **qwen3-30b-a3b** model, so every call to it failed. Agents on Cloudflare now use **qwen3.8-27b** again, a saved choice of the old model is switched over, and short calls such as **Where to next** answer without spending their allowance thinking."},
-    {"kind": "feature", "title": "AI gateway with a fallback notice", "text": "Model calls can now go through a shared AI gateway that picks the provider. If the gateway is down, calls carry on using the free providers, and a dismissible banner at the top of the page says so."}
-  ],
+  "unreleased": [],
   "releases": [
+    {
+      "version": "0.13.0",
+      "date": "23 November 2026",
+      "title": "1 new feature, 1 fix",
+      "groups": [
+        {
+          "title": "New",
+          "fixes": [
+            {
+              "title": "AI gateway with a fallback notice",
+              "text": "Model calls can now go through a shared AI gateway that picks the provider. If the gateway is down, calls carry on using the free providers, and a dismissible banner at the top of the page says so."
+            }
+          ]
+        },
+        {
+          "title": "Fixes",
+          "fixes": [
+            {
+              "title": "Cloudflare model back to Qwen 3.8",
+              "text": "Cloudflare retired the faster **qwen3-30b-a3b** model, so every call to it failed. Agents on Cloudflare now use **qwen3.8-27b** again, a saved choice of the old model is switched over, and short calls such as **Where to next** answer without spending their allowance thinking."
+            }
+          ]
+        }
+      ]
+    },
     {
       "version": "0.12.0",
       "date": "18 November 2026",
