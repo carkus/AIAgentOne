@@ -5,7 +5,7 @@
 // plus the config itself (persona, system prompt, final tools and their code).
 // The timed waterfall (CaseFile, from bootstrap_trace) sits underneath.
 // Built entirely from data that travels with the config; no server state.
-import type { AgentConfig, BootstrapIssue } from '../types'
+import type { AgentConfig, BootstrapIssue, SmokeTest } from '../types'
 import CaseFile from './CaseFile'
 import styles from '../styles/AgentMakingReport.module.css'
 
@@ -47,6 +47,28 @@ function IssueList({ issues }: { issues: BootstrapIssue[] }) {
   )
 }
 
+const SMOKE_LABEL: Record<SmokeTest['status'], string> = {
+  passed: 'Passed',
+  failed: 'Failed',
+  inconclusive: 'Inconclusive',
+}
+
+function SmokeList({ tests }: { tests: SmokeTest[] }) {
+  return (
+    <ul className={styles.list}>
+      {tests.map((t, i) => (
+        <li key={i}>
+          <span className={t.status === 'failed' ? styles.fail : styles.pass}>{SMOKE_LABEL[t.status]}</span>{' '}
+          <code>{t.tool}</code>
+          <span className={styles.meta}>
+            {' '}· {t.from_example ? 'its own example' : 'sample inputs'}{t.inputs ? ` ${t.inputs}` : ''} · {t.detail}
+          </span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 export default function AgentMakingReport({ config }: Props) {
   const r = config.bootstrap_report
   const trace = config.bootstrap_trace ?? []
@@ -60,7 +82,11 @@ export default function AgentMakingReport({ config }: Props) {
   const mcpDropped = r?.mcp_dropped ?? []
   const proposed = r?.design?.tools ?? []
   const finalNames = new Set(tools.map(t => t.name))
-  const repairsNeeded = !!r?.json_fix || (checks?.issues.length ?? 0) > 0 || mcpDropped.length > 0 || !!r?.added_web_search
+  const overlaps = r?.tool_design?.overlaps ?? []
+  const missingGuidance = r?.tool_design?.missing_guidance ?? []
+  const smoke = r?.smoke_tests ?? []
+  const smokeAfterFix = r?.smoke_tests_after_fix ?? []
+  const repairsNeeded = !!r?.json_fix || (checks?.issues.length ?? 0) > 0 || mcpDropped.length > 0 || !!r?.added_web_search || overlaps.length > 0
   const selfChecks = r?.self_checks ?? []
 
   let step = 0
@@ -130,8 +156,9 @@ export default function AgentMakingReport({ config }: Props) {
             <h4 className={styles.stepTitle}><span className={styles.num}>{n()}</span>Checks and repairs</h4>
             <p>
               Before anything runs, code checks the result: valid JSON, every tool’s Python compiles, no call to a
-              function that won’t exist inside the sandbox, no invented localhost service, no fake “saved” result, and
-              every MCP tool matches a real one.
+              function that won’t exist inside the sandbox, no invented localhost service, no fake “saved” result, no two
+              tools doing the same job, and every MCP tool matches a real one. Then each tool the model wrote is
+              test-run once in the sandbox on its example inputs.
             </p>
             {!repairsNeeded && <p>Everything passed first time.</p>}
             {r.json_fix && (
@@ -152,6 +179,40 @@ export default function AgentMakingReport({ config }: Props) {
                   </p>
                 )}
               </>
+            )}
+            {overlaps.length > 0 && (
+              <>
+                <p>Tools that duplicated another tool, removed so the agent has one clear choice:</p>
+                <ul className={styles.list}>
+                  {overlaps.map((o, i) => (
+                    <li key={i}>
+                      <code>{o.dropped}</code> does the same job as <code>{o.kept}</code>
+                      <span className={styles.meta}> · {Math.round(o.similarity * 100)}% similar by {o.method === 'embedding' ? 'meaning' : 'wording'}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            {smoke.length > 0 && (
+              <>
+                <p>
+                  Test runs (a failure that is the code’s fault is sent back with the fixes above; one that depends
+                  on a remote service is inconclusive and the tool is kept):
+                </p>
+                <SmokeList tests={smoke} />
+                {smokeAfterFix.length > 0 && (
+                  <>
+                    <p>Test runs after the fix:</p>
+                    <SmokeList tests={smokeAfterFix} />
+                  </>
+                )}
+              </>
+            )}
+            {missingGuidance.length > 0 && (
+              <p className={styles.meta}>
+                No full “use when / don’t use when / returns” guidance written for:{' '}
+                {missingGuidance.map(d => <code key={d} className={styles.inlineCode}>{d}</code>)}
+              </p>
             )}
             {mcpDropped.length > 0 && (
               <p>

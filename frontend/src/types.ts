@@ -65,6 +65,8 @@ export interface AgentSpec {
 }
 
 export interface BootstrapIssue { tool: string; message: string }
+export interface ToolOverlap { dropped: string; kept: string; similarity: number; method: 'embedding' | 'words' }
+export interface SmokeTest { tool: string; status: 'passed' | 'failed' | 'inconclusive'; detail: string; inputs?: string; from_example?: boolean; network?: boolean }
 
 export interface BootstrapReport {
   agent_type?: string | null;
@@ -81,6 +83,9 @@ export interface BootstrapReport {
   json_fix?: { error: string; fixed: boolean };
   code_checks?: { issues: BootstrapIssue[]; retried: boolean; remaining?: BootstrapIssue[]; dropped?: string[] };
   mcp_dropped?: string[];
+  tool_design?: { overlaps: ToolOverlap[]; missing_guidance: string[] };
+  smoke_tests?: SmokeTest[];
+  smoke_tests_after_fix?: SmokeTest[];
   spec_notes?: string[];
   // Set when code added web search because the design gave a
   // General/Research agent none (bootstrap._ensure_web_search).
