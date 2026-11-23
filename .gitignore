@@ -24,6 +24,11 @@ samconfig.toml
 
 # Server-side saved-search storage (live user data, not source)
 /data/
+# A SQLite database created wherever a process starts when DATA_DIR isn't
+# set (backend/src/db.py); the real local one is data/agentone.db
+agentone.db
+agentone.db-wal
+agentone.db-shm
 
 # Offline eval harness output (backend/eval_harness.py)
 /eval_runs/
