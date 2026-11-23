@@ -3008,6 +3008,12 @@
   cursor: pointer;
 }
 
+/* The brief's one-click choices ("Lead with …", "Drop …"): one per line. */
+.briefChoiceLine {
+  display: block;
+  text-align: left;
+}
+
 .focusInlineAction:disabled {
   cursor: default;
   opacity: 0.6;

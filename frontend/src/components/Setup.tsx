@@ -2815,7 +2815,7 @@ export default function Setup({ agentName, onAgentNameChange, bootstrapping, err
                           <button
                             key={`${c.action}|${c.topic}`}
                             type="button"
-                            className={styles.focusInlineAction}
+                            className={`${styles.focusInlineAction} ${styles.briefChoiceLine}`}
                             onClick={() => applyBriefChoice(c)}
                             disabled={bootstrapping || briefLoading}
                           >

@@ -3,6 +3,11 @@
   "unreleased": [
     {
       "kind": "fix",
+      "title": "Brief suggestions on their own lines",
+      "text": "The brief's one-click suggestions, such as **Lead with …** or **Drop …**, ran together on one line. Each now sits on its own line."
+    },
+    {
+      "kind": "fix",
       "title": "Web search falls back whenever Tavily fails",
       "text": "Searches moved to Exa only when Tavily ran out of credits. If Tavily was down, timed out or refused the key, the search failed. Now any failed search is tried again on the next provider, and for the next 5 minutes searches go straight to the one that worked."
     },
