@@ -3,6 +3,11 @@
   "unreleased": [
     {
       "kind": "fix",
+      "title": "Web search falls back whenever Tavily fails",
+      "text": "Searches moved to Exa only when Tavily ran out of credits. If Tavily was down, timed out or refused the key, the search failed. Now any failed search is tried again on the next provider, and for the next 5 minutes searches go straight to the one that worked."
+    },
+    {
+      "kind": "fix",
       "title": "A slow model no longer stops an agent being built",
       "text": "If the model timed out while fixing a broken tool, the whole agent failed to build. Now the broken tool is left out and the agent is built with the rest."
     },

@@ -59,6 +59,12 @@ _FAILURE_RETRY_SECONDS = 300
 _paused_until: dict[str, float] = {}
 QUOTA_RETRY_SECONDS = float(os.environ.get("MCP_QUOTA_RETRY_SECONDS", "3600"))
 RATE_LIMIT_PAUSE_SECONDS = 60
+# A web search provider that failed for another reason (outage, timeout, bad
+# key) while the next provider answered the same query is skipped for this
+# long. Kept apart from _paused_until: it isn't a usage limit, so the UI's
+# "paused at its limit" note doesn't list it, and the tool isn't hidden.
+SEARCH_OUTAGE_SECONDS = 300
+_search_down_until: dict[str, float] = {}
 _QUOTA_RE = re.compile(
     r"\b432\b|usage limit|plan limit|exceeds your plan|quota|out of credits|insufficient credits",
     re.IGNORECASE,
@@ -317,6 +323,12 @@ def active_web_search() -> dict | None:
     for p in WEB_SEARCH_PROVIDERS:
         if p["server_id"] not in MCP_SERVERS or quota_exhausted(p["server_id"]):
             continue
+        if _search_down(p["server_id"]) and any(
+            q["server_id"] in MCP_SERVERS and not quota_exhausted(q["server_id"])
+            and not _search_down(q["server_id"])
+            for q in WEB_SEARCH_PROVIDERS
+        ):
+            continue
         real = next((c for c in list_tools(p["server_id"]) if c["tool_name"] == p["tool"]), None)
         if real:
             return {**p, "description": real["description"], "input_schema": real["input_schema"]}
@@ -338,23 +350,56 @@ def web_search_status() -> dict:
     }
 
 
+def _search_down(server_id: str) -> bool:
+    until = _search_down_until.get(server_id)
+    return until is not None and time.monotonic() < until
+
+
+def _is_error(result) -> bool:
+    return isinstance(result, dict) and bool(result.get("error"))
+
+
 def call_web_search(server_id: str, tool_name: str, inputs: dict):
     """call_tool for a web search tool, falling back mid-turn: if the call
-    fails because this provider just hit (or is paused at) its limit, the
-    same query goes to the next usable provider."""
-    result = call_tool(server_id, tool_name, inputs)
-    if not (isinstance(result, dict) and result.get("error")) or not quota_exhausted(server_id):
+    fails for any reason (usage limit, outage, timeout, bad key), the same
+    query goes to the next usable provider in WEB_SEARCH_PROVIDERS. A
+    provider whose failure the next one answered is skipped by
+    active_web_search for SEARCH_OUTAGE_SECONDS (unless it's already paused
+    at a limit), so later searches go straight to the one that works, even
+    from an agent whose tool names the failed provider."""
+    if _search_down(server_id):
+        result = {"error": f"{server_id}.{tool_name} failed recently; trying the next web search"}
+    else:
+        result = call_tool(server_id, tool_name, inputs)
+    if not _is_error(result):
         return result
-    fallback = active_web_search()
     query = str((inputs or {}).get("query") or "").strip()
-    if not fallback or not query:
-        return result
+    if not query:
+        return call_tool(server_id, tool_name, inputs) if _search_down(server_id) else result
     try:
         n = int((inputs or {}).get("max_results") or (inputs or {}).get("numResults") or 5)
     except (TypeError, ValueError):
         n = 5
-    logger.info("web search: %s unavailable, using %s", server_id, fallback["label"])
-    return call_tool(fallback["server_id"], fallback["tool"], fallback["args"](query, max(1, min(n, 10))))
+    n = max(1, min(n, 10))
+    tried = {server_id}
+    for p in WEB_SEARCH_PROVIDERS:
+        sid = p["server_id"]
+        if sid in tried or sid not in MCP_SERVERS or quota_exhausted(sid):
+            continue
+        tried.add(sid)
+        if not any(c["tool_name"] == p["tool"] for c in list_tools(sid)):
+            continue
+        logger.warning("web search: %s.%s failed (%s); trying %s",
+                       server_id, tool_name, str(result.get("error"))[:200], p["label"])
+        alt = call_tool(sid, p["tool"], p["args"](query, n))
+        if not _is_error(alt):
+            if not quota_exhausted(server_id):
+                _search_down_until[server_id] = time.monotonic() + SEARCH_OUTAGE_SECONDS
+            return alt
+    if _search_down(server_id):
+        # Skipped above and nothing else answered: give it its own try.
+        return call_tool(server_id, tool_name, inputs)
+    return result
 
 
 def _parse_search_results(reply) -> list[dict]:
