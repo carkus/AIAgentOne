@@ -15,6 +15,7 @@ import eval_log
 import mcp_client
 import documents
 import run_trace
+import tool_quality
 
 logger = logging.getLogger(__name__)
 
@@ -1810,6 +1811,9 @@ clarifying question only belongs AFTER you've already produced real findings
     # (CLAUDE.md MCP priority 6) and route accordingly.
     tool_def_map = {t["name"]: t for t in tool_definitions}
     tool_names = {t["function"]["name"] for t in tools}
+    # Every offered tool's argument schema, so a call is checked before it
+    # runs (tool_quality.check_arguments).
+    tool_schemas = {t["function"]["name"]: t["function"].get("parameters") for t in tools}
     provider = agent_config.get("provider")
     model = agent_config.get("ollama_model")
 
@@ -2465,6 +2469,14 @@ clarifying question only belongs AFTER you've already produced real findings
 
                 yield _status("Double-checking the reply…", "Self-check", "The finished reply is checked for relevance, links and tool use.")
                 try:
+                    for eval_result in eval_checks.check_tool_use(
+                        tool_calls_log, list(tool_def_map), final_text, provider, model, agent_id=agent_id,
+                    ):
+                        eval_log.record(eval_result)
+                        yield {"type": "eval_result", **eval_result}
+                except Exception as e:
+                    logger.info("tool_use signals skipped: %s", e)
+                try:
                     for eval_result in eval_checks.check_chat_response(
                         last_user_message, final_text, tool_calls_log, stripped_link_count, provider, model,
                         agent_id=agent_id, focus_topics=agent_config.get("keywords"),
@@ -2602,6 +2614,20 @@ clarifying question only belongs AFTER you've already produced real findings
                     yield from _tool_call_eval_events(tool_name, tool_inputs, tool_def, result_str, source, idx)
                     continue
 
+                # Arguments are checked against the tool's schema before it
+                # runs: harmless mismatches ("5" for an integer, "True" for
+                # an enum's "true") are fixed, anything else comes straight
+                # back as an error naming the expected arguments, and the
+                # tool never runs on them.
+                tool_inputs, arg_problems = tool_quality.check_arguments(tool_inputs, tool_schemas.get(tool_name))
+                if arg_problems:
+                    result = tool_quality.rejection(tool_name, arg_problems, tool_schemas.get(tool_name))
+                    result_str = _finish(tc, tool_name, tool_inputs, result, source)
+                    _tool_span(idx, tool_name, source, result)
+                    yield {"type": "tool_result", "tool": tool_name, "result": result_str, "source": source, "call_index": idx}
+                    yield from _tool_call_eval_events(tool_name, tool_inputs, tool_def, result_str, source, idx)
+                    continue
+
                 if tool_name == "delegate_to_worker":
                     if delegation_count >= max_delegations:
                         result = {
@@ -2696,6 +2722,8 @@ clarifying question only belongs AFTER you've already produced real findings
                     implementation = tool_def["implementation"] if tool_def else "result = 'Unknown tool'"
                     result = execute_tool(implementation, tool_inputs)
 
+                if tool_name not in _SEARCH_TOOL_NAMES:
+                    result = tool_quality.add_hint(result)
                 result_str = _finish(tc, tool_name, tool_inputs, result, source)
                 _tool_span(idx, tool_name, source, result)
                 yield {"type": "tool_result", "tool": tool_name, "result": result_str, "source": source, "call_index": idx}

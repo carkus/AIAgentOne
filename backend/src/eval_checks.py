@@ -324,6 +324,115 @@ def check_tool_call(
     return results
 
 
+def _call_failed(result) -> bool:
+    if not isinstance(result, str):
+        return False
+    if result.startswith("Tool execution error:"):
+        return True
+    if result.lstrip().startswith("{"):
+        try:
+            parsed = json.loads(result)
+        except ValueError:
+            return False
+        return isinstance(parsed, dict) and bool(parsed.get("error"))
+    return False
+
+
+# Tools whose result isn't text a reply would quote (images, workers' own
+# cards), so "result ignored" doesn't apply to them.
+_NOT_QUOTED_TOOLS = {"delegate_to_worker", "search_image", "generate_image"}
+_COMMON_LONG_WORDS = frozenset(
+    "because between through however without against following another important "
+    "available information including different something research results".split()
+)
+
+
+def _distinctive_words(text: str) -> set[str]:
+    import re
+    return {w for w in re.findall(r"[a-z][a-z\-]{6,}", text.lower()) if w not in _COMMON_LONG_WORDS}
+
+
+def check_tool_use(
+    tool_calls_log: list[dict], offered_tools: list[str], final_text: str,
+    provider: str | None, model: str | None, agent_id: str | None = None,
+) -> list[dict]:
+    """Turn-level online signals over the whole turn's tool calls:
+
+    - tool_recovery: after a failed call, did the agent switch tool or fix
+      the inputs (pass), or repeat the identical failing call (warning)?
+    - unused_tools: the agent's own tools (generated/MCP) never called in a
+      turn that did use tools. A signal about the tool, not the model, so
+      it carries no provider/model and the bandit never counts it.
+    - result_ignored: a successful text result with none of its distinctive
+      words in the reply, i.e. fetched and then not used."""
+    results = []
+    calls = [c for c in tool_calls_log or [] if isinstance(c, dict)]
+    if not calls:
+        return results
+
+    switched = corrected = repeated = 0
+    for i, call in enumerate(calls[:-1]):
+        if not _call_failed(call.get("result")):
+            continue
+        nxt = calls[i + 1]
+        if nxt.get("tool") != call.get("tool"):
+            switched += 1
+        elif json.dumps(nxt.get("inputs"), sort_keys=True, default=str) != json.dumps(call.get("inputs"), sort_keys=True, default=str):
+            corrected += 1
+        else:
+            repeated += 1
+    failures = sum(1 for c in calls if _call_failed(c.get("result")))
+    if failures:
+        parts = []
+        if switched:
+            parts.append(f"switched tool {switched}×")
+        if corrected:
+            parts.append(f"retried with new inputs {corrected}×")
+        if repeated:
+            parts.append(f"repeated the identical failing call {repeated}×")
+        last_failed = _call_failed(calls[-1].get("result"))
+        if last_failed:
+            parts.append("the last call failed and nothing followed it")
+        results.append(_result(
+            "tool_recovery", "tool_call", None, repeated == 0,
+            f"{failures} failed call(s): " + ("; ".join(parts) or "no follow-up call"),
+            "deterministic", severity="info" if repeated == 0 else "warning",
+            provider=provider, model=model, agent_id=agent_id,
+        ))
+
+    called = {c.get("tool") for c in calls}
+    unused = [t for t in offered_tools if t not in called]
+    if offered_tools:
+        results.append(_result(
+            "unused_tools", "tool_call", None, not unused,
+            "every one of the agent's own tools was used" if not unused
+            else f"offered but not called this turn: {', '.join(unused)}",
+            "deterministic", severity="info", agent_id=agent_id,
+        ))
+
+    reply_words = _distinctive_words(final_text or "")
+    ignored, checked = [], 0
+    for call in calls:
+        result = call.get("result")
+        if call.get("tool") in _NOT_QUOTED_TOOLS or _call_failed(result) or not isinstance(result, str) or len(result) < 300:
+            continue
+        words = _distinctive_words(result)
+        if len(words) < 10:
+            continue
+        checked += 1
+        if not (words & reply_words):
+            ignored.append(str(call.get("tool")))
+    if checked and (final_text or "").strip():
+        results.append(_result(
+            "result_ignored", "tool_call", None, not ignored,
+            f"all {checked} text result(s) show up in the reply" if not ignored
+            else f"{len(ignored)} of {checked} result(s) fetched but not used in the reply: {', '.join(ignored)}",
+            "deterministic", severity="info",
+            provider=provider, model=model, agent_id=agent_id,
+        ))
+    return results
+
+
 def check_worker_delegation(
     task: str, final_response: str, tool_calls: list[dict], provider: str | None,
     model: str | None, worker_name: str | None = None,
