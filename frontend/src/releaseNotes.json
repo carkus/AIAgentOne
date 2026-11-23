@@ -1,43 +1,52 @@
 {
   "_about": "Changes since the last deploy go in \"unreleased\", each tagged kind fix/feature/breaking. On deploy, tools/release-notes/release.py turns them into the next release (newest first) and sets the version. See CLAUDE.md, Versioning.",
-  "unreleased": [
-    {
-      "kind": "fix",
-      "title": "Brief suggestions on their own lines",
-      "text": "The brief's one-click suggestions, such as **Lead with …** or **Drop …**, ran together on one line. Each now sits on its own line."
-    },
-    {
-      "kind": "fix",
-      "title": "Web search falls back whenever Tavily fails",
-      "text": "Searches moved to Exa only when Tavily ran out of credits. If Tavily was down, timed out or refused the key, the search failed. Now any failed search is tried again on the next provider, and for the next 5 minutes searches go straight to the one that worked."
-    },
-    {
-      "kind": "fix",
-      "title": "A slow model no longer stops an agent being built",
-      "text": "If the model timed out while fixing a broken tool, the whole agent failed to build. Now the broken tool is left out and the agent is built with the rest."
-    },
-    {
-      "kind": "feature",
-      "title": "Tools are test-run before an agent goes live",
-      "text": "Each tool the agent writes for itself is now run once on its own example while the agent is built. A tool that crashes is sent back to be fixed, or left out, instead of failing in the middle of a job. **How this agent was made** lists each test run and its result."
-    },
-    {
-      "kind": "feature",
-      "title": "Duplicate tools are removed",
-      "text": "When the agent writes a tool that does the same job as another one, or as a built-in tool, the copy is removed so the agent doesn't have to choose between two of the same thing. The report says which tool was kept."
-    },
-    {
-      "kind": "feature",
-      "title": "Tools say when to use them",
-      "text": "Every written tool now describes when to use it, when not to, and what it returns, so the agent picks the right tool more often."
-    },
-    {
-      "kind": "feature",
-      "title": "Bad tool arguments are caught first",
-      "text": "A tool call with a missing or wrong argument is now stopped before the tool runs, and the agent is told what the tool expects. Small slips, such as a number sent as text, are fixed quietly. A failed tool result now ends with a short **What to do** hint."
-    }
-  ],
+  "unreleased": [],
   "releases": [
+    {
+      "version": "0.14.0",
+      "date": "23 November 2026",
+      "title": "4 new features, 3 fixes",
+      "groups": [
+        {
+          "title": "New",
+          "fixes": [
+            {
+              "title": "Tools are test-run before an agent goes live",
+              "text": "Each tool the agent writes for itself is now run once on its own example while the agent is built. A tool that crashes is sent back to be fixed, or left out, instead of failing in the middle of a job. **How this agent was made** lists each test run and its result."
+            },
+            {
+              "title": "Duplicate tools are removed",
+              "text": "When the agent writes a tool that does the same job as another one, or as a built-in tool, the copy is removed so the agent doesn't have to choose between two of the same thing. The report says which tool was kept."
+            },
+            {
+              "title": "Tools say when to use them",
+              "text": "Every written tool now describes when to use it, when not to, and what it returns, so the agent picks the right tool more often."
+            },
+            {
+              "title": "Bad tool arguments are caught first",
+              "text": "A tool call with a missing or wrong argument is now stopped before the tool runs, and the agent is told what the tool expects. Small slips, such as a number sent as text, are fixed quietly. A failed tool result now ends with a short **What to do** hint."
+            }
+          ]
+        },
+        {
+          "title": "Fixes",
+          "fixes": [
+            {
+              "title": "Brief suggestions on their own lines",
+              "text": "The brief's one-click suggestions, such as **Lead with …** or **Drop …**, ran together on one line. Each now sits on its own line."
+            },
+            {
+              "title": "Web search falls back whenever Tavily fails",
+              "text": "Searches moved to Exa only when Tavily ran out of credits. If Tavily was down, timed out or refused the key, the search failed. Now any failed search is tried again on the next provider, and for the next 5 minutes searches go straight to the one that worked."
+            },
+            {
+              "title": "A slow model no longer stops an agent being built",
+              "text": "If the model timed out while fixing a broken tool, the whole agent failed to build. Now the broken tool is left out and the agent is built with the rest."
+            }
+          ]
+        }
+      ]
+    },
     {
       "version": "0.13.1",
       "date": "23 November 2026",
