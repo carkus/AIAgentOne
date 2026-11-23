@@ -267,6 +267,26 @@ def catalog_summary() -> list[dict]:
     return catalog
 
 
+def _error_body(server_id: str, result):
+    """Tavily's remote server reports a failed call (e.g. status 432, out of
+    credits) as ordinary text holding a JSON error object, without setting
+    the MCP error flag, so it read as a successful search: no pause, no
+    fallback to Exa. A remote server's reply that is a JSON object with an
+    "error" key and no results becomes {"error": <that text>}."""
+    if not isinstance(result, str) or MCP_SERVERS.get(server_id, {}).get("transport") != "http":
+        return result
+    text = result.strip()
+    if not text.startswith("{"):
+        return result
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return result
+    if isinstance(data, dict) and data.get("error") and not data.get("results"):
+        return {"error": text}
+    return result
+
+
 def call_tool(server_id: str, tool_name: str, inputs: dict) -> dict:
     if quota_exhausted(server_id):
         return {"error": f"{server_id}.{tool_name} is unavailable: its usage limit has been reached. Use other tools or your own knowledge."}
@@ -279,6 +299,7 @@ def call_tool(server_id: str, tool_name: str, inputs: dict) -> dict:
         )
         note_error(server_id, description)
         return {"error": f"MCP call to {server_id}.{tool_name} failed: {description}"}
+    result = _error_body(server_id, result)
     if isinstance(result, dict) and result.get("error"):
         note_error(server_id, result["error"])
     return result

@@ -3,6 +3,22 @@
   "unreleased": [],
   "releases": [
     {
+      "version": "0.13.1",
+      "date": "23 November 2026",
+      "title": "1 fix",
+      "groups": [
+        {
+          "title": "Fixes",
+          "fixes": [
+            {
+              "title": "Web search works when Tavily runs out",
+              "text": "When Tavily's monthly credits ran out, every web search came back as an error, because Tavily reported it in a way that wasn't recognised. Searches now move to Exa straight away, and Tavily is tried again an hour later."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "version": "0.13.0",
       "date": "23 November 2026",
       "title": "1 new feature, 1 fix",
