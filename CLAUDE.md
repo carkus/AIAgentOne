@@ -86,6 +86,7 @@ expecting it to reach production.
 | `backend/eval_replay.py`, `backend/eval_cases/chat_fixtures/` | Chat-suite tool tape: patches every tool entry point `agent_stream.py` uses (primitives, MCP, generated `exec()`, whole delegated workers) to answer from a recorded tape; one committed fixture per case = frozen `AgentConfig` + tape |
 | `frontend/src/components/ScoreboardModal.tsx` | "▤ Scoreboard" (its button in Setup's top icon bar is removed for now; the modal is still mounted) — renders `eval-scoreboard.json` per suite (pass rate per check per model, median time, tokens, cost/task, replay stats) beside the live bandit pick and live pass rates from `GET /models` |
 | `backend/src/agent_spec.py` | Advanced Setup's structured spec — `normalize()` (re-run at every trust boundary), `bootstrap_prompt_block()`, `enforce_on_config()` (post-bootstrap pins/drops), `runtime_scope_note()`, and the allow-list predicates `agent_stream.py` enforces |
+| `backend/src/tool_quality.py` | Tool selection quality, before and during a run. Bootstrap: `fold_guidance()` folds each tool's `use_when`/`do_not_use_when`/`returns` into its description; `find_overlaps()` drops near-duplicate tools (primitives and MCP tools win; embeddings, else a lexical match); `smoke_test()` runs each generated tool once on its `example` (or schema-built inputs) in the sandbox, and a crash joins the same one-retry/then-drop flow as the static checks (network/timeout results are inconclusive and kept). Runtime (`agent_stream.py`): `check_arguments()` coerces harmless mismatches and rejects missing/mistyped/off-enum arguments before a tool runs; `add_hint()` appends "What to do: …" to failed results |
 | `backend/src/scope_guard.py` | Output guard for `spec.out_of_scope` — separate narrow judge call screens final replies and worker responses; one regenerate, then a code-authored decline; fail-open |
 | `backend/src/run_trace.py` | Run-trace spans (Showcase Goal 1): a per-run ContextVar sink that `llm_client.create_chat_completion` (via `_trace=` labels), `agent_stream.py` tool/worker paths and `orchestrator.run_worker` record timed spans into; streamed as `{"type":"trace","span":...}` events and logged to stderr (logger `run_trace`) for journalctl timing |
 | `backend/src/db.py` | Shared SQLite database (`DATA_DIR/agentone.db`) behind every server-side store — WAL mode, `BEGIN IMMEDIATE` write transactions, so gunicorn workers and the MCP server process can all write safely at once; one-time import of each legacy `data/*.json` file (renamed to `*.json.migrated` afterwards) |
@@ -272,6 +273,17 @@ itself: `sandbox.uses_network()` looks for `requests`/`socket`/`http`/`bs4`/
 
 The implementation must assign its result to a variable named `result`.
 
+Before a call reaches the sandbox, `agent_stream.py` runs
+`tool_quality.check_arguments()` against the tool's `input_schema`: a missing
+required field, a wrong type or an off-enum value returns a rejection
+(`{error, expected_arguments, hint}`) without running the tool. After the
+turn, `eval_checks.check_tool_use()` records three online signals:
+`tool_recovery` (a failed call followed by a switched tool, corrected
+arguments, or an identical repeat, which warns), `unused_tools` (offered but
+never called; no provider/model so it doesn't feed the bandit) and
+`result_ignored` (a successful result none of whose distinctive words reach
+the reply).
+
 A tool whose definition carries `source: "mcp"` skips this entirely — `agent_stream.py` routes it to `mcp_client.call_tool(mcp_server, mcp_tool, inputs)`, which calls the real vetted MCP server as a subprocess (`mcp_registry.py` lists which servers are trusted). No `implementation` string exists for these tools; there's nothing to `exec()`.
 
 ### Bootstrap grounding (RAG) and MCP tool selection
@@ -372,7 +384,10 @@ python backend/eval_harness.py --models ollama:qwen2.5-coder:7b --only url_summa
   `run_agent_stream` plus the `eval_result` checks it already yields
   (`check_chat_response`, tool checks, scope guard), plus per-case `expect`
   keys (`tools_called_any`/`_none`, `min_`/`max_tool_calls`,
-  `delegated_min`, `response_contains_any`, `mermaid`, `max_chars`).
+  `delegated_min`, `response_contains_any`, `mermaid`, `max_chars`,
+  `tool_sequence`). `tool_sequence` scores selection and order: a list of
+  steps that must appear in that order, each `"a|b"` matching any of those
+  substrings of the tool name, with other calls allowed in between.
   - Every arm answers as the **same agent**: each case's fixture
     (`eval_cases/chat_fixtures/<id>.json`) holds an `AgentConfig`
     bootstrapped once while recording, then frozen. Only
