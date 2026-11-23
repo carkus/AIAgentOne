@@ -377,6 +377,21 @@ def _chat_case_checks(case: dict, response: str, tool_calls: list[dict]) -> list
         add("min_tool_calls", len(names) >= expect["min_tool_calls"], f"{len(names)} calls (min {expect['min_tool_calls']})")
     if "max_tool_calls" in expect:
         add("max_tool_calls", len(names) <= expect["max_tool_calls"], f"{len(names)} calls (max {expect['max_tool_calls']})")
+    if "tool_sequence" in expect:
+        # Expected steps in order, each "a|b" = any of these substrings; other
+        # calls may come between them. Scores selection (right tools) and
+        # order together; "calls/step" in the reason shows the step count.
+        steps = [[w.lower() for w in str(step).split("|") if w] for step in expect["tool_sequence"]]
+        pos, matched = 0, 0
+        for alts in steps:
+            while pos < len(names) and not any(a in names[pos] for a in alts):
+                pos += 1
+            if pos >= len(names):
+                break
+            matched += 1
+            pos += 1
+        add("tool_sequence", matched == len(steps),
+            f"matched {matched}/{len(steps)} expected steps in {len(names)} calls: {names}")
     if "delegated_min" in expect:
         n = names.count("delegate_to_worker")
         add("delegated_min", n >= expect["delegated_min"], f"{n} workers (min {expect['delegated_min']})")
