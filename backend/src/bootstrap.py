@@ -825,23 +825,28 @@ def generate_agent_config(
     _prepare_tools(config, provider)
     tool_errors, _ = _check_tools(config, forbidden_names)
     if tool_errors:
-        correction_response = create_chat_completion(
-            _trace="Bootstrap: fix tool code",
-            provider=provider,
-            model=model,
-            max_tokens=16000,
-            messages=[
-                {"role": "user", "content": prompt},
-                {"role": "assistant", "content": text},
-                {"role": "user", "content": (
-                    "The JSON parsed, but these tools' `implementation` strings are not "
-                    f"valid: {_describe_tool_errors(tool_errors)}. "
-                    "Return ONLY the corrected, complete, valid JSON object with fixed "
-                    "implementations — no markdown fences, no explanation, no truncation."
-                )},
-            ],
-        )
-        text = _extract_text(correction_response)
+        try:
+            correction_response = create_chat_completion(
+                _trace="Bootstrap: fix tool code",
+                provider=provider,
+                model=model,
+                max_tokens=16000,
+                messages=[
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": text},
+                    {"role": "user", "content": (
+                        "The JSON parsed, but these tools' `implementation` strings are not "
+                        f"valid: {_describe_tool_errors(tool_errors)}. "
+                        "Return ONLY the corrected, complete, valid JSON object with fixed "
+                        "implementations — no markdown fences, no explanation, no truncation."
+                    )},
+                ],
+            )
+            text = _extract_text(correction_response)
+        except Exception as e:
+            # Same as the stream path: drop the broken tools, keep the agent.
+            logger.warning("Tool-code correction retry failed; dropping broken tools: %s", e)
+            text = ""
         retried_config, retry_error = _try_parse(text)
         if retried_config is not None:
             config = retried_config
@@ -1176,9 +1181,12 @@ def _generate_agent_config_stream(
                 if retry_smoke:
                     report["smoke_tests_after_fix"] = retry_smoke
         except Exception as e:
+            # A failed fix-up call (timeout, provider down) drops the broken
+            # tools below instead of failing the whole agent over them.
+            logger.warning("Tool-code correction retry failed; dropping broken tools: %s", e)
             yield _model_event(tool_fix_meta)
-            yield {"type": "error", "message": f"Tool-code correction retry failed: {e}"}
-            return
+            yield {"type": "status", "stage": "checks",
+                   "message": "Couldn't get the broken tools fixed; leaving them out"}
 
     dropped_tool_names: list[str] = []
     if tool_errors:

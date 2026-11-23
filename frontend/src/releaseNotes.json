@@ -2,6 +2,11 @@
   "_about": "Changes since the last deploy go in \"unreleased\", each tagged kind fix/feature/breaking. On deploy, tools/release-notes/release.py turns them into the next release (newest first) and sets the version. See CLAUDE.md, Versioning.",
   "unreleased": [
     {
+      "kind": "fix",
+      "title": "A slow model no longer stops an agent being built",
+      "text": "If the model timed out while fixing a broken tool, the whole agent failed to build. Now the broken tool is left out and the agent is built with the rest."
+    },
+    {
       "kind": "feature",
       "title": "Tools are test-run before an agent goes live",
       "text": "Each tool the agent writes for itself is now run once on its own example while the agent is built. A tool that crashes is sent back to be fixed, or left out, instead of failing in the middle of a job. **How this agent was made** lists each test run and its result."
