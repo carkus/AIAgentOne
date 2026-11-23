@@ -3,8 +3,9 @@
 Most AI tools make you fit your problem to their interface. Agent One works
 the other way round.
 
-You describe the agent you want: its character, the topics it should focus
-on, and the outputs you'd like back. The platform then builds it: the system
+You describe the agent you want: its character, what it should focus on
+(a few topics, an image or up to three documents), and the outputs you'd
+like back. The platform then builds it: the system
 prompt, the persona and the tools, including Python implementations written
 on the spot. A researcher on grid storage, an analyst comparing two
 frameworks, a historian of the Roman era. Each one is purpose-built on
@@ -30,12 +31,12 @@ Setup is four steps, drawn as a live process graph as you go:
 | Step | What happens |
 | --- | --- |
 | **Character** | Agent type (General Task, Researcher, Job search), plus stackable personality and behaviour pills (Concise, Skeptical, Cite Sources, Proactive, …). |
-| **Focus** | The topics the agent works on. Smart Focus embeds them to flag near-duplicate topics and suggest related ones you've saved before. |
-| **Brief** | An LLM drafts a short brief interpreting what the chosen topics mean together, plus a graph of how the agent will approach the job. |
+| **Focus** | What the agent works on, from one of three tabs. **Keywords**: topics, with Smart Focus flagging near-duplicates and suggesting related ones you've saved before. **Image**: read once by a vision model. **Document**: up to three PDF, Word, text or CSV files, read in full on every turn. |
+| **Brief** | An LLM drafts a short brief interpreting what the Focus means as a whole, backed by one quick web search, plus a graph of how the agent will approach the job. One-click suggestions (lead with a topic, drop or add one) reshape the Focus. |
 | **Outputs** | The agent proposes 3–5 deliverables for the job (report, chart, spreadsheet, slide deck, …), with its own picks pre-ticked. |
 
 **Deploy** then streams the bootstrap: grounding, design, one node per
-generated tool, code checks and self-checks. Saved agent profiles can be
+generated tool, code checks, a test run of each tool, and self-checks. Saved agent profiles can be
 reloaded with **Load Agent**. A profile that has already been built
 relaunches without bootstrapping again.
 
@@ -68,31 +69,61 @@ review and edit the generated config, which is re-validated server-side.
 
 ---
 
-## How it works
+## How it works: the flow
 
 ```text
-┌──────────────────────────────────────────────────────────────────┐
-│ Phase 1: Bootstrap  (POST /bootstrap, streamed NDJSON)           │
-│                                                                  │
-│ purpose + spec ──► LLM generates AgentConfig                     │
-│   • system_prompt, persona                                       │
-│   • tools[]: a generated Python implementation, OR a reference   │
-│     to a real tool on a vetted MCP server (source: "mcp")        │
-│ Grounded by: similar past bootstraps (embedding retrieval)       │
-│              + the live catalog of vetted MCP tools              │
-│ Then: compile / forbidden-call / undefined-name (AST) checks,    │
-│       one retry, then drop; spec rules enforced in code          │
-└──────────────────────────────────────────────────────────────────┘
-┌──────────────────────────────────────────────────────────────────┐
-│ Phase 2: Agent loop  (POST /agent, streamed NDJSON)              │
-│                                                                  │
-│ message ──► LLM with the agent's tools                           │
-│   ├─ generated tool     → sandboxed child process                │
-│   ├─ source: "mcp"      → the real MCP server                    │
-│   ├─ delegate_to_worker → bootstrap + run a worker (concurrent)  │
-│   └─ final reply        → self-checks, scope guard → UI          │
-└──────────────────────────────────────────────────────────────────┘
+ SETUP (browser)                         POST /brief*, /brief-outputs
+ ─────────────────────────────────────────────────────────────────────
+ Character ─► Focus ─► Brief ─► Outputs
+ type,        keywords  LLM reading of   3–5 deliverables, the
+ traits,      | image   the Focus + one  agent's picks pre-ticked
+ behaviours   | docs    web search
+                                   │
+                                   ▼  Deploy
+ BOOTSTRAP                               POST /bootstrap (streamed)
+ ─────────────────────────────────────────────────────────────────────
+ 1. Ground     similar past agents (embeddings) + live MCP tool catalog
+ 2. Design     LLM writes the AgentConfig: persona, system prompt and
+               tools, each a vetted MCP tool or generated Python, with
+               use_when / do_not_use_when / returns / example
+ 3. Tidy       guidance folded into descriptions; duplicate tools
+               removed (built-in and MCP tools win)
+ 4. Check      static: compiles, no calls to tools that don't exist,
+               no invented helpers (AST), no fake localhost services;
+               test run: each generated tool runs once on its example
+               in the sandbox
+ 5. Repair     one fix-up call for anything broken; still broken (or
+               the call fails) → that tool is dropped, the agent lives
+ 6. Enforce    Advanced Setup's spec pinned in code; self-checks;
+               saved as a future example
+                                   │
+                                   ▼
+ AGENT LOOP                              POST /agent (streamed)
+ ─────────────────────────────────────────────────────────────────────
+ message ─► LLM with the agent's tools ─┐
+   ▲                                    │ tool call
+   │        name allowed? ── no ─► error result, never runs
+   │        arguments valid? ── no ─► rejected with what the tool expects
+   │          (harmless slips like "5" for 5 are fixed quietly)
+   │        ├─ generated  → sandboxed child process
+   │        ├─ MCP        → the real server; a failed web search
+   │        │               retries on the next provider (Tavily ⇄ Exa)
+   │        └─ delegate   → bootstrap + run a worker (concurrent)
+   │        failed result? → "What to do: …" hint appended
+   └──────── results back to the LLM, until it answers
+                                   │
+                                   ▼ final reply
+ AFTER THE TURN
+ ─────────────────────────────────────────────────────────────────────
+ scope guard (if out-of-scope topics are set) · self-checks
+ tool-use signals: recovered after a failure? tools never used?
+                   results fetched and then ignored?
+ → reply, worker cards, outputs, next-step buttons, case file
 ```
+
+Every step above is timed and recorded: the bootstrap in "How this agent
+was made" (including each test run and any tool removed as a duplicate),
+each turn in its case file.
 
 The backend is stateless for conversations: the full history and
 `AgentConfig` travel with every request.
@@ -108,16 +139,18 @@ Publishing is an explicit step, never automatic.
 
 | Feature | What it does | Code |
 | --- | --- | --- |
-| Provider cascade | Gemini → Cloudflare Workers AI (hosted Qwen) → Ollama (local). The provider and model are chosen per agent in Settings. | `llm_client.py` |
+| Provider cascade | Optionally a shared AI gateway first; then Gemini → Cloudflare Workers AI (hosted Qwen) → Ollama (local). The provider and model are chosen per agent in Settings. If the gateway is down, a banner says so and calls carry on directly. | `llm_client.py` |
 | Bootstrap grounding (RAG) | Past `purpose → config` pairs are embedded and the closest are given to the model as few-shot examples. | `bootstrap_memory.py`, `embeddings.py` |
-| Vetted MCP tools | The model can pick a real tool (time, fetch, Tavily web search) instead of writing one. | `mcp_registry.py`, `mcp_client.py` |
+| Vetted MCP tools | The model can pick a real tool (time, fetch, web search) instead of writing one. Web search is Tavily, then Exa: a search that fails for any reason is retried on the other, and a provider at its usage limit is paused. | `mcp_registry.py`, `mcp_client.py` |
 | Generated-code checks | Deterministic checks catch calls to tools that don't exist, invented helper names (AST), and fake localhost proxies before the agent runs. | `bootstrap.py` |
+| Tool quality | Tools state when to use them and what they return; near-duplicates are removed; each generated tool is test-run on its example before launch. At run time, arguments are checked against the tool's schema before it runs, failed results carry a hint, and each turn records recovery, unused tools and ignored results. | `tool_quality.py`, `eval_checks.py` |
+| Focus material | Images are described once by a vision model; documents are read to text and given to every turn, capped to fit smaller models. | `documents.py` |
 | Sandbox | Each generated tool call runs in a fresh `python -I` process with a scrubbed environment (no secrets), a timeout, rlimits, an import allowlist, and no network unless the code uses it. | `sandbox.py`, `sandbox_runner.py` |
 | Structured spec | Persona, tool allow-lists and limits are enforced in code; mission and scope are restated to the model every turn. | `agent_spec.py` |
 | Scope guard | A separate judge call screens replies against out-of-scope topics. It allows one regenerate, then substitutes a decline written in code. | `scope_guard.py` |
 | Self-checks | Every bootstrap, reply, tool call and delegation is graded and tagged with the provider/model that produced it. | `eval_checks.py`, `eval_log.py` |
 | Model recommendation | UCB1 bandit over that history; Settings shows a "data-backed pick". Advisory only, never auto-selected. | `bandit.py` |
-| Offline evals | Fixed cases × model arms × repeats. Chat cases replay recorded tool responses, so runs are repeatable. Results go to a scoreboard. | `eval_harness.py`, `eval_replay.py`, `eval_cases/` |
+| Offline evals | Fixed cases × model arms × repeats. Chat cases replay recorded tool responses, so runs are repeatable, and can require tools in a set order (`tool_sequence`). Results go to a scoreboard. | `eval_harness.py`, `eval_replay.py`, `eval_cases/` |
 | Run trace | Timed spans for every model call, tool and worker, streamed to the case file and logged for production timing. | `run_trace.py`, `CaseFile.tsx` |
 | Brief, outputs, Smart Focus | The Setup steps that interpret the job before anything is built. | `brief.py`, `focus_insights.py` |
 | Outputs (relics) | Builds files from an answer or from the brief. | `relic.py` |
@@ -158,7 +191,9 @@ AIAgentOne/
 │       ├── scope_guard.py     # Out-of-scope output judge
 │       ├── sandbox.py         # Per-call process isolation for generated tools
 │       ├── sandbox_runner.py  # The sandboxed child process
-│       ├── tools.py           # Primitive tools (fetch_page, search_jobs, images, save_output)
+│       ├── tool_quality.py    # Tool guidance, duplicate check, test runs, argument checks, error hints
+│       ├── tools.py           # Primitive tools (fetch_page, search_jobs, images)
+│       ├── documents.py       # Focus images and documents
 │       ├── brief.py           # Setup's brief, brief graph and proposed outputs
 │       ├── focus_insights.py  # Smart Focus (embedding similarity)
 │       ├── relic.py           # Output files: CSV, chart, PDF, DOCX, slides, …
@@ -181,6 +216,7 @@ AIAgentOne/
 │       ├── AgentMakingReport.tsx, ScoreboardModal.tsx, MermaidDiagram.tsx
 │       └── …
 ├── deploy/                    # redeploy.sh, systemd units, nginx config
+├── tools/                     # release-notes (versioning + PDFs), ai-methods PDF
 ├── CLAUDE.md                  # Full architecture notes and design decisions
 ├── RUN.md                     # Local setup, step by step
 └── DEPLOY.md                  # Droplet setup
@@ -213,6 +249,17 @@ context setting, and prompts are otherwise cut to about 2k tokens.
 
 ---
 
+## Versioning
+
+The version is never set by hand. Each user-visible change adds an entry
+(`fix`, `feature` or `breaking`) to `unreleased` in
+`frontend/src/releaseNotes.json`. A frontend deploy runs
+`tools/release-notes/release.py`, which picks the bump from the highest
+kind, writes the version, moves the entries into a dated release and builds
+its PDF. The notes are shown on Setup's **Release Notes** link.
+
+---
+
 ## Deployment
 
 Production is a systemd + nginx droplet, not AWS. See
@@ -241,7 +288,9 @@ deploy/redeploy.sh all
 | `OLLAMA_BASE_URL`, `OLLAMA_MODEL` | Local Ollama (dev) |
 | `DISABLE_OLLAMA` | `1` removes Ollama from the cascade and the model list |
 | `LLM_PROVIDER` | Force one provider, e.g. `ollama` |
+| `CHATTY_GATEWAY_URL`, `CHATTY_GATEWAY_KEY`, `CHATTY_GATEWAY_POLICY` | Optional shared AI gateway tried before the direct providers |
 | `TAVILY_API_KEY` | Enables the vetted Tavily web-search MCP server |
+| `EXA_API_KEY` | Optional key for Exa, the fallback web search (keyless without it) |
 | `HF_API_TOKEN` | Hugging Face image-generation fallback |
 | `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` | `search_jobs` primitive (job-search agent type) |
 | `MCP_API_KEY` | API key for `/mcp`, independent of the site login |
@@ -267,8 +316,10 @@ See `.env.example` for a starting point.
    published agents are stored server-side.
 3. **Authentication is perimeter-only.** One shared login gates the
    deployed app; there are no per-user accounts.
-4. **File output is ephemeral.** `save_output` files are written to the
-   server's temp directory and are lost on restart.
+4. **Outputs are rebuilt, not stored.** Agents no longer write files on
+   the server; a requested file becomes an export built from the reply.
+   Files named in old chats live in the server's temp folder and are lost
+   on restart.
 5. **Out-of-scope is judged, not guaranteed.** Persona, tool lists and
    limits are enforced in code. Meaning-level rules (mission, out-of-scope)
    are asked of the model and screened by a judge that fails open, so they
