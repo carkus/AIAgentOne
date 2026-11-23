@@ -12,6 +12,7 @@ import agent_spec
 import eval_checks
 import eval_log
 import mcp_client
+import tool_quality
 import documents as _documents
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,10 @@ Design and configure this agent. Return a single JSON object with exactly these 
     {{
       "name": "<snake_case_name>",
       "description": "<what this tool does — the model reads this to decide when to call it>",
+      "use_when": "<the requests or situations this tool is the right choice for>",
+      "do_not_use_when": "<when a different tool fits better, naming that tool when one exists>",
+      "returns": "<the shape of `result`, e.g. a list of dicts with 'title' and 'url'>",
+      "example": {{"<param>": "<a realistic sample value the tool can really run on>"}},
       "input_schema": {{
         "type": "object",
         "properties": {{
@@ -72,6 +77,8 @@ Rules:
 - Design tools that directly serve the stated purpose
 - Check the vetted MCP tools list above first for each capability the agent needs — only write a generated Python `implementation` for something no primitive and no vetted MCP tool already covers
 - Tool implementations must be self-contained Python snippets
+- Every generated tool needs use_when, do_not_use_when, returns and example. They become the text the agent reads when choosing between tools, so make use_when and do_not_use_when tell this tool apart from the others. `example` is run once before the agent goes live; a tool that crashes on it is sent back for fixing. Use `enum` in input_schema when a parameter only takes a few fixed values
+- Do not write two tools that do the same job, and do not write one that repeats a primitive or a vetted MCP tool you chose: a duplicate is removed
 - Do NOT generate a fetch_url, fetch_page, scrape, or HTTP-request tool — use the built-in `fetch_page` primitive instead
 - Do NOT generate an image-search or fetch-image tool — use the built-in `search_image` primitive instead
 - Do NOT generate an image-generation or image-creation tool — use the built-in `generate_image` primitive instead
@@ -428,6 +435,42 @@ def _drop_save_output_tools(config: dict) -> None:
         ]
 
 
+def _prepare_tools(config: dict, provider: str | None) -> dict:
+    """Runs on every freshly parsed config, before the code checks: drops a
+    `save_output` tool, removes generated tools that duplicate another tool
+    (tool_quality.find_overlaps, on the model's own descriptions), then
+    folds each tool's use_when/do_not_use_when/returns into its description
+    (tool_quality.fold_guidance). Returns the report part for both."""
+    _drop_save_output_tools(config)
+    try:
+        overlaps = tool_quality.find_overlaps(config, provider)
+    except Exception as e:
+        logger.info("overlap check skipped: %s", e)
+        overlaps = []
+    missing = tool_quality.fold_guidance(config)
+    return {"overlaps": overlaps, "missing_guidance": missing}
+
+
+def _check_tools(config: dict, forbidden_names: set[str], smoke: bool = True) -> tuple[list, list[dict]]:
+    """Every deterministic tool check, then a smoke test (one sandboxed run
+    on the tool's example inputs) of each tool those checks passed. Returns
+    (errors for the retry/drop flow, smoke-test results for the report)."""
+    errors = (
+        _tool_syntax_errors(config)
+        + _forbidden_call_errors(config, forbidden_names)
+        + _undefined_call_errors(config, forbidden_names)
+        + _local_endpoint_errors(config)
+    )
+    smoke_results: list[dict] = []
+    if smoke:
+        try:
+            smoke_errors, smoke_results = tool_quality.smoke_test(config, skip={n for n, _ in errors})
+            errors += smoke_errors
+        except Exception as e:
+            logger.info("smoke test skipped: %s", e)
+    return errors, smoke_results
+
+
 def _format_mcp_catalog(catalog: list[dict]) -> str:
     """Renders mcp_client.catalog_summary() for the bootstrap prompt. Empty
     catalog (no vetted server reachable in this environment) renders as an
@@ -779,13 +822,8 @@ def generate_agent_config(
     forbidden_names = {"search_jobs", "fetch_page", "search_image", "generate_image"} | {
         c["tool_name"] for c in mcp_client.catalog_summary()
     }
-    _drop_save_output_tools(config)
-    tool_errors = (
-        _tool_syntax_errors(config)
-        + _forbidden_call_errors(config, forbidden_names)
-        + _undefined_call_errors(config, forbidden_names)
-        + _local_endpoint_errors(config)
-    )
+    _prepare_tools(config, provider)
+    tool_errors, _ = _check_tools(config, forbidden_names)
     if tool_errors:
         correction_response = create_chat_completion(
             _trace="Bootstrap: fix tool code",
@@ -807,13 +845,8 @@ def generate_agent_config(
         retried_config, retry_error = _try_parse(text)
         if retried_config is not None:
             config = retried_config
-            _drop_save_output_tools(config)
-            tool_errors = (
-                _tool_syntax_errors(config)
-                + _forbidden_call_errors(config, forbidden_names)
-                + _undefined_call_errors(config, forbidden_names)
-                + _local_endpoint_errors(config)
-            )
+            _prepare_tools(config, provider)
+            tool_errors, _ = _check_tools(config, forbidden_names)
 
     if tool_errors:
         broken = {name for name, _ in tool_errors}
@@ -1102,13 +1135,13 @@ def _generate_agent_config_stream(
             for t in config.get("tools", []) if isinstance(t, dict)
         ],
     }
-    _drop_save_output_tools(config)
-    tool_errors = (
-        _tool_syntax_errors(config)
-        + _forbidden_call_errors(config, forbidden_names)
-        + _undefined_call_errors(config, forbidden_names)
-        + _local_endpoint_errors(config)
-    )
+    report["tool_design"] = _prepare_tools(config, provider)
+    for o in report["tool_design"]["overlaps"]:
+        yield {"type": "status", "message": f"Removed {o['dropped']}: it does the same job as {o['kept']}", "stage": "checks"}
+    if any(t.get("implementation") for t in config.get("tools", []) if isinstance(t, dict)):
+        yield {"type": "status", "message": "Test-running each tool on its example…", "stage": "checks"}
+    tool_errors, smoke_results = _check_tools(config, forbidden_names)
+    report["smoke_tests"] = smoke_results
     report["code_checks"] = {"issues": _issue_list(tool_errors), "retried": bool(tool_errors)}
     if tool_errors:
         yield {"type": "status", "message": "Fixing broken tool code…", "stage": "checks"}
@@ -1136,13 +1169,12 @@ def _generate_agent_config_stream(
             retried_config, _ = _try_parse(text)
             if retried_config is not None:
                 config = retried_config
-                _drop_save_output_tools(config)
-                tool_errors = (
-                    _tool_syntax_errors(config)
-                    + _forbidden_call_errors(config, forbidden_names)
-                    + _undefined_call_errors(config, forbidden_names)
-                    + _local_endpoint_errors(config)
-                )
+                retry_design = _prepare_tools(config, provider)
+                report["tool_design"]["overlaps"] += retry_design["overlaps"]
+                report["tool_design"]["missing_guidance"] = retry_design["missing_guidance"]
+                tool_errors, retry_smoke = _check_tools(config, forbidden_names)
+                if retry_smoke:
+                    report["smoke_tests_after_fix"] = retry_smoke
         except Exception as e:
             yield _model_event(tool_fix_meta)
             yield {"type": "error", "message": f"Tool-code correction retry failed: {e}"}
@@ -1234,12 +1266,9 @@ def validate_config(config: dict) -> tuple[dict, list[dict]]:
         c["tool_name"] for c in mcp_client.catalog_summary()
     }
     _drop_save_output_tools(config)
-    for name, err in (
-        _tool_syntax_errors(config)
-        + _forbidden_call_errors(config, forbidden_names)
-        + _undefined_call_errors(config, forbidden_names)
-        + _local_endpoint_errors(config)
-    ):
+    tool_quality.fold_guidance(config)
+    tool_errors, _ = _check_tools(config, forbidden_names, smoke=False)
+    for name, err in tool_errors:
         where = f" (line {err.lineno})" if err.lineno not in (None, "?") else ""
         errors.append({"tool": name, "message": f"{err.msg}{where}"})
     _resolve_mcp_tools(config)

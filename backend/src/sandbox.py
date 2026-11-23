@@ -103,9 +103,11 @@ def _child_env(temp_dir: str) -> dict:
     return env
 
 
-def run(implementation: str, inputs: dict, http_timeout: float = 20.0) -> dict:
+def run(implementation: str, inputs: dict, http_timeout: float = 20.0, timeout: float | None = None) -> dict:
     """Run one implementation. Returns {"ok", "result"|"error", "isolation",
-    "network"}; never raises."""
+    "network"}; never raises. `timeout` overrides TIMEOUT_SECONDS (bootstrap's
+    smoke test uses a shorter one)."""
+    wall = timeout or TIMEOUT_SECONDS
     temp_dir = tempfile.gettempdir()  # shared with save_output / GET /file/<name>
     network = uses_network(implementation)
     job = {
@@ -124,12 +126,12 @@ def run(implementation: str, inputs: dict, http_timeout: float = 20.0) -> dict:
             [sys.executable, "-I", _RUNNER],
             input=json.dumps(job, default=str) + "\n",
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=TIMEOUT_SECONDS, env=_child_env(temp_dir), cwd=temp_dir,
+            timeout=wall, env=_child_env(temp_dir), cwd=temp_dir,
             creationflags=flags,
         )
     except subprocess.TimeoutExpired:
         return {"ok": False, "network": network, "isolation": [],
-                "error": f"Tool timed out after {TIMEOUT_SECONDS:.0f}s and was stopped."}
+                "error": f"Tool timed out after {wall:.0f}s and was stopped."}
     except Exception as e:
         return {"ok": False, "network": network, "isolation": [], "error": f"Sandbox failed to start: {e}"}
 
